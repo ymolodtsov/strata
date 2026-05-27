@@ -99,6 +99,10 @@ enum SessionState {
             ref.window != nil && ref.store != nil
         }
     }
+
+    static func forget(window: NSWindow) {
+        windowStores.removeValue(forKey: ObjectIdentifier(window))
+    }
 }
 
 // MARK: - Focused Value for Active Store
@@ -365,7 +369,7 @@ struct StrataApp: App {
                 Button("New Tab") {
                     openUntitledTab()
                 }
-                .keyboardShortcut("n")
+                .keyboardShortcut("t")
             }
 
             CommandGroup(after: .newItem) {
@@ -461,6 +465,13 @@ struct StrataApp: App {
             // MARK: Window — Tab Switching
 
             CommandGroup(after: .windowArrangement) {
+                Button("Close Tab") {
+                    closeCurrentTab()
+                }
+                .keyboardShortcut("w")
+
+                Divider()
+
                 Button("Select Tab 1") {
                     selectTab(at: 0)
                 }
@@ -550,6 +561,17 @@ struct StrataApp: App {
     private func duplicateActiveDocument() {
         guard let duplicateURL = activeStore?.duplicate() else { return }
         openURLAsTab(duplicateURL)
+    }
+
+    private func closeCurrentTab() {
+        guard let window = NSApp.keyWindow else { return }
+        activeStore?.save()
+        SessionState.forget(window: window)
+        window.performClose(nil)
+
+        DispatchQueue.main.async {
+            SessionState.saveOpenDocuments()
+        }
     }
 
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
