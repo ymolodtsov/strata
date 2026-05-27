@@ -263,9 +263,17 @@ struct WindowConfigurator: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
-            nsView.window?.representedURL = url
             WindowTabCoordinator.configure(nsView.window)
             if let window = nsView.window {
+                if let url {
+                    window.representedURL = url
+                    window.representedFilename = url.path
+                    window.title = url.lastPathComponent
+                } else {
+                    window.representedURL = nil
+                    window.representedFilename = ""
+                    window.title = store.documentTitle
+                }
                 SessionState.associate(store: store, with: window)
             }
         }

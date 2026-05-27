@@ -125,7 +125,7 @@ class OutlineStore {
     var documentTitle: String {
         guard let url = currentFilePath else { return "Untitled" }
         if url == Self.defaultFileURL { return "Strata" }
-        return url.deletingPathExtension().lastPathComponent
+        return url.lastPathComponent
     }
 
     init() {
