@@ -38,6 +38,9 @@ struct OutlineTextField: NSViewRepresentable {
     }()
 
     static let formattingAttribute = NSAttributedString.Key("family.ma.strata.formattingKind")
+    private static let linkDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -182,11 +185,14 @@ struct OutlineTextField: NSViewRepresentable {
             editor.undoManager?.disableUndoRegistration()
             storage.beginEditing()
             storage.addAttributes([.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle], range: fullRange)
+            storage.removeAttribute(.link, range: fullRange)
             storage.removeAttribute(.backgroundColor, range: fullRange)
+            storage.removeAttribute(.underlineStyle, range: fullRange)
             storage.removeAttribute(Self.formattingAttribute, range: fullRange)
             if !isDone {
                 Self.applyFormatting(currentFormatting, to: storage, baseFont: font)
             }
+            Self.applyDetectedLinks(to: storage)
             if !searchQ.isEmpty {
                 Self.applySearchHighlight(to: storage, query: searchQ)
             }
@@ -211,10 +217,12 @@ struct OutlineTextField: NSViewRepresentable {
             // Not editing — build styled attributed string directly
             let styled: NSAttributedString
             if isDone {
-                styled = NSAttributedString(
+                let doneText = NSMutableAttributedString(
                     string: currentText,
                     attributes: [.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle]
                 )
+                Self.applyDetectedLinks(to: doneText)
+                styled = doneText
             } else {
                 styled = Self.styledAttributedString(
                     from: currentText, baseFont: font,
@@ -249,6 +257,7 @@ struct OutlineTextField: NSViewRepresentable {
             attributes: [.font: baseFont, .foregroundColor: baseColor, .paragraphStyle: paragraphStyle]
         )
         applyFormatting(formatting, to: attributed, baseFont: baseFont)
+        applyDetectedLinks(to: attributed)
         return attributed
     }
 
@@ -281,6 +290,27 @@ struct OutlineTextField: NSViewRepresentable {
                 attributed.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
             }
             attributed.addAttribute(formattingAttribute, value: span.kind.rawValue, range: range)
+        }
+    }
+
+    static func applyDetectedLinks(to attributed: NSMutableAttributedString) {
+        let text = attributed.string
+        let nsText = text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        guard fullRange.length > 0 else { return }
+
+        linkDetector?.enumerateMatches(in: text, range: fullRange) { match, _, _ in
+            guard let match,
+                  let url = match.url,
+                  match.range.location != NSNotFound,
+                  match.range.length > 0,
+                  match.range.location + match.range.length <= fullRange.length else { return }
+
+            attributed.addAttributes([
+                .link: url,
+                .foregroundColor: NSColor.linkColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: match.range)
         }
     }
 
@@ -323,9 +353,14 @@ struct OutlineTextField: NSViewRepresentable {
                 editor.isHorizontallyResizable = false
                 editor.isVerticallyResizable = true
                 editor.isRichText = true
+                editor.linkTextAttributes = [
+                    .foregroundColor: NSColor.linkColor,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue
+                ]
 
                 // Install right-click context menu monitor for formatting
                 tf.installContextMenuMonitor()
+                tf.installLinkClickMonitor()
                 tf.installSelectionRestyleObserver { [weak tf, weak self] in
                     guard let tf, let self else { return }
                     Self.restyleEditor(tf, parent: self.parent)
@@ -362,6 +397,7 @@ struct OutlineTextField: NSViewRepresentable {
         func controlTextDidEndEditing(_ obj: Notification) {
             if let tf = obj.object as? StrataTextField {
                 tf.removeContextMenuMonitor()
+                tf.removeLinkClickMonitor()
                 tf.removeSelectionRestyleObserver()
                 tf.lastStyledText = nil
                 tf.lastStyledFormatting = nil
@@ -391,11 +427,14 @@ struct OutlineTextField: NSViewRepresentable {
                 .foregroundColor: baseColor,
                 .paragraphStyle: OutlineTextField.paragraphStyle
             ], range: fullRange)
+            storage.removeAttribute(.link, range: fullRange)
             storage.removeAttribute(.backgroundColor, range: fullRange)
+            storage.removeAttribute(.underlineStyle, range: fullRange)
             storage.removeAttribute(OutlineTextField.formattingAttribute, range: fullRange)
             if !isDone {
                 OutlineTextField.applyFormatting(parent.formatting, to: storage, baseFont: font)
             }
+            OutlineTextField.applyDetectedLinks(to: storage)
             if !searchQ.isEmpty {
                 OutlineTextField.applySearchHighlight(to: storage, query: searchQ)
             }
@@ -599,6 +638,7 @@ class StrataTextField: NSTextField {
 
     // Context menu event monitor
     private var rightClickMonitor: Any?
+    private var linkClickMonitor: Any?
     private var selectionRestyleObserver: NSObjectProtocol?
     private var pendingSelectionRestyle = false
     private var isRestylingSelection = false
@@ -650,6 +690,7 @@ class StrataTextField: NSTextField {
 
     deinit {
         removeContextMenuMonitor()
+        removeLinkClickMonitor()
         removeSelectionRestyleObserver()
     }
 
@@ -690,6 +731,65 @@ class StrataTextField: NSTextField {
             NSEvent.removeMonitor(monitor)
             rightClickMonitor = nil
         }
+    }
+
+    func installLinkClickMonitor() {
+        removeLinkClickMonitor()
+        linkClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+                  let self,
+                  let editor = self.currentEditor() as? NSTextView,
+                  let eventWindow = event.window,
+                  eventWindow == self.window else {
+                return event
+            }
+
+            let locationInEditor = editor.convert(event.locationInWindow, from: nil)
+            guard editor.bounds.contains(locationInEditor),
+                  let url = self.linkURL(at: locationInEditor, in: editor) else {
+                return event
+            }
+
+            NSWorkspace.shared.open(url)
+            return nil
+        }
+    }
+
+    func removeLinkClickMonitor() {
+        if let monitor = linkClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            linkClickMonitor = nil
+        }
+    }
+
+    private func linkURL(at locationInEditor: NSPoint, in editor: NSTextView) -> URL? {
+        guard let layoutManager = editor.layoutManager,
+              let textContainer = editor.textContainer else { return nil }
+
+        let textContainerOrigin = editor.textContainerOrigin
+        let point = NSPoint(
+            x: locationInEditor.x - textContainerOrigin.x,
+            y: locationInEditor.y - textContainerOrigin.y
+        )
+        guard point.x >= 0, point.y >= 0 else { return nil }
+
+        let characterIndex = layoutManager.characterIndex(
+            for: point,
+            in: textContainer,
+            fractionOfDistanceBetweenInsertionPoints: nil
+        )
+        guard characterIndex < editor.textStorage?.length ?? 0,
+              let value = editor.textStorage?.attribute(.link, at: characterIndex, effectiveRange: nil) else {
+            return nil
+        }
+
+        if let url = value as? URL {
+            return url
+        }
+        if let string = value as? String {
+            return URL(string: string)
+        }
+        return nil
     }
 
     func installSelectionRestyleObserver(_ restyle: @escaping () -> Void) {
