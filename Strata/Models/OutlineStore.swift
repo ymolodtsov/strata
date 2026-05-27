@@ -1039,8 +1039,8 @@ class OutlineStore {
         }
     }
 
-    /// Duplicate the current document: save the original, then save a copy to a new file
-    func duplicate() {
+    /// Duplicate the current document to a new file without moving the original.
+    func duplicate() -> URL? {
         save()
 
         let panel = NSSavePanel()
@@ -1054,8 +1054,12 @@ class OutlineStore {
         }
 
         if panel.runModal() == .OK, let url = panel.url {
-            save(to: url)
+            let data = OPMLService.serialize(root: root)
+            try? data.write(to: url)
+            RecentFiles.shared.add(url)
+            return url
         }
+        return nil
     }
 
     // MARK: - Export

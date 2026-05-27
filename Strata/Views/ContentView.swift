@@ -94,7 +94,7 @@ struct ContentView: View {
         }
         .navigationTitle(store.documentTitle)
         .background(Color(.textBackgroundColor))
-        .background(WindowConfigurator(url: store.currentFilePath))
+        .background(WindowConfigurator(store: store, url: store.currentFilePath))
         .frame(minWidth: 400, minHeight: 300)
         .onAppear {
             removeEventMonitor()
@@ -227,12 +227,16 @@ struct ContentView: View {
 // MARK: - Window Configuration (proxy icon + native tabbing)
 
 struct WindowConfigurator: NSViewRepresentable {
+    let store: OutlineStore
     let url: URL?
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(view.window)
+            if let window = view.window {
+                SessionState.associate(store: store, with: window)
+            }
         }
         return view
     }
@@ -241,6 +245,9 @@ struct WindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             nsView.window?.representedURL = url
             WindowTabCoordinator.configure(nsView.window)
+            if let window = nsView.window {
+                SessionState.associate(store: store, with: window)
+            }
         }
     }
 }

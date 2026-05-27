@@ -3,10 +3,14 @@ import SwiftUI
 // MARK: - Session State (persists open document tabs across launches)
 
 enum WindowTabCoordinator {
-    static weak var requestedParentWindow: NSWindow?
+    private static weak var requestedParentWindow: NSWindow?
+    private static var pendingTabCount = 0
 
     static func requestNextWindowAsTab() {
-        requestedParentWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
+        if requestedParentWindow == nil {
+            requestedParentWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
+        }
+        pendingTabCount += 1
     }
 
     static func configure(_ window: NSWindow?) {
@@ -15,24 +19,43 @@ enum WindowTabCoordinator {
 
         guard let parent = requestedParentWindow,
               parent != window,
+              pendingTabCount > 0,
               parent.isVisible else { return }
 
-        requestedParentWindow = nil
         parent.addTabbedWindow(window, ordered: .above)
+        pendingTabCount -= 1
+        if pendingTabCount == 0 {
+            requestedParentWindow = nil
+        }
         window.makeKeyAndOrderFront(nil)
     }
 }
 
 enum SessionState {
     private static let key = "openDocumentPaths"
+    private final class WindowStoreRef {
+        weak var window: NSWindow?
+        weak var store: OutlineStore?
+
+        init(window: NSWindow, store: OutlineStore) {
+            self.window = window
+            self.store = store
+        }
+    }
+
+    private static var windowStores: [ObjectIdentifier: WindowStoreRef] = [:]
 
     /// URLs waiting to be loaded by newly created windows during restoration.
     static var pendingRestoreURLs: [URL] = []
 
+    static func associate(store: OutlineStore, with window: NSWindow) {
+        cleanupWindowStores()
+        windowStores[ObjectIdentifier(window)] = WindowStoreRef(window: window, store: store)
+    }
+
     /// Collect file paths from all living OutlineStore instances and save to UserDefaults.
     static func saveOpenDocuments() {
-        let urls = OutlineStore.openStores.allObjects
-            .compactMap(\.currentFilePath)
+        let urls = orderedOpenDocumentURLs()
         // Deduplicate while preserving order
         var seen = Set<String>()
         let unique = urls.filter { seen.insert($0.path).inserted }
@@ -45,6 +68,35 @@ enum SessionState {
         return paths.compactMap { path in
             let url = URL(fileURLWithPath: path)
             return FileManager.default.fileExists(atPath: path) ? url : nil
+        }
+    }
+
+    private static func orderedOpenDocumentURLs() -> [URL] {
+        cleanupWindowStores()
+
+        var urls: [URL] = []
+        var seenWindows = Set<ObjectIdentifier>()
+
+        for window in NSApp.windows {
+            let tabWindows = window.tabGroup?.windows ?? [window]
+            for tabWindow in tabWindows {
+                let id = ObjectIdentifier(tabWindow)
+                guard seenWindows.insert(id).inserted,
+                      let store = windowStores[id]?.store,
+                      let url = store.currentFilePath else { continue }
+                urls.append(url)
+            }
+        }
+
+        if !urls.isEmpty { return urls }
+
+        return OutlineStore.openStores.allObjects
+            .compactMap(\.currentFilePath)
+    }
+
+    private static func cleanupWindowStores() {
+        windowStores = windowStores.filter { _, ref in
+            ref.window != nil && ref.store != nil
         }
     }
 }
@@ -351,8 +403,8 @@ struct StrataApp: App {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
 
-                Button("Duplicate") {
-                    activeStore?.duplicate()
+                Button("Duplicate...") {
+                    duplicateActiveDocument()
                 }
 
                 Divider()
@@ -493,6 +545,11 @@ struct StrataApp: App {
             WindowTabCoordinator.requestNextWindowAsTab()
             openWindow(id: "main")
         }
+    }
+
+    private func duplicateActiveDocument() {
+        guard let duplicateURL = activeStore?.duplicate() else { return }
+        openURLAsTab(duplicateURL)
     }
 
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
