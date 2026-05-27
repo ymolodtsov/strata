@@ -451,11 +451,6 @@ struct StrataApp: App {
                 }
                 .keyboardShortcut("i", modifiers: .command)
 
-                Button("Code") {
-                    StrataTextField.currentEditingField?.wrapCode()
-                }
-                .keyboardShortcut("e", modifiers: .command)
-
                 Button("Highlight") {
                     StrataTextField.currentEditingField?.wrapHighlight()
                 }

@@ -149,7 +149,7 @@ struct OutlineTextField: NSViewRepresentable {
 
         // NOTE: Do NOT set tf.font or tf.textColor here.
         // Setting tf.font strips all font attributes from attributedStringValue
-        // (bold, italic, code), causing a visible flash of unstyled text before
+        // (bold, italic, highlight), causing a visible flash of unstyled text before
         // the styled version is reapplied. The font is set once in makeNSView;
         // all per-character styling goes through attributedStringValue (non-editing)
         // or textStorage (editing).
@@ -253,12 +253,6 @@ struct OutlineTextField: NSViewRepresentable {
         let fullRange = NSRange(location: 0, length: nsText.length)
         guard fullRange.length > 0 else { return }
 
-        var codeRanges: [NSRange] = []
-
-        func intersectsCode(_ range: NSRange) -> Bool {
-            codeRanges.contains { NSIntersectionRange($0, range).length > 0 }
-        }
-
         func dimMarkers(matchRange: NSRange, markerLength: Int) {
             attributed.addAttribute(
                 .foregroundColor,
@@ -284,22 +278,8 @@ struct OutlineTextField: NSViewRepresentable {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
             for match in regex.matches(in: text, range: fullRange) {
                 let contentRange = match.range(at: 1)
-                guard !intersectsCode(contentRange) else { continue }
                 body(contentRange)
                 dimMarkers(matchRange: match.range, markerLength: markerLength)
-            }
-        }
-
-        if let codeRegex = try? NSRegularExpression(pattern: "`([^`\\n]+)`") {
-            for match in codeRegex.matches(in: text, range: fullRange) {
-                let contentRange = match.range(at: 1)
-                let codeFont = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
-                attributed.addAttributes([
-                    .font: codeFont,
-                    .backgroundColor: NSColor.quaternaryLabelColor
-                ], range: contentRange)
-                dimMarkers(matchRange: match.range, markerLength: 1)
-                codeRanges.append(match.range)
             }
         }
 
@@ -556,11 +536,6 @@ class StrataTextField: NSTextField {
         italicItem.target = self
         menu.addItem(italicItem)
 
-        let codeItem = NSMenuItem(title: "Code", action: #selector(wrapCode), keyEquivalent: "e")
-        codeItem.keyEquivalentModifierMask = .command
-        codeItem.target = self
-        menu.addItem(codeItem)
-
         let highlightItem = NSMenuItem(title: "Highlight", action: #selector(wrapHighlight), keyEquivalent: "")
         highlightItem.target = self
         menu.addItem(highlightItem)
@@ -580,7 +555,6 @@ class StrataTextField: NSTextField {
 
     @objc func wrapBold() { toggleWrap(prefix: "**", suffix: "**") }
     @objc func wrapItalic() { toggleWrap(prefix: "*", suffix: "*") }
-    @objc func wrapCode() { toggleWrap(prefix: "`", suffix: "`") }
     @objc func wrapHighlight() { toggleWrap(prefix: "==", suffix: "==") }
 
     /// Toggle inline formatting markers around the selection or cursor.
@@ -710,11 +684,6 @@ class StrataTextField: NSTextField {
         // Cmd+I — Italic
         if event.keyCode == 34 && flags == .command {
             wrapItalic()
-            return true
-        }
-        // Cmd+E — Code
-        if event.keyCode == 14 && flags == .command {
-            wrapCode()
             return true
         }
         // Cmd+Shift+H — Highlight

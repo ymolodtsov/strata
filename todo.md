@@ -23,16 +23,16 @@ fundamental macOS document behaviors that users expect from any native app:
 
 ## Recurring: Formatting / Rendering Issues
 
-- [x] **Formatting race condition** — styled text (bold, italic, code) flashes unstyled
+- [x] **Formatting race condition** — styled text (bold, italic, highlight) flashes unstyled
       momentarily during editing. Root cause was `tf.font` being set in `applyStyle`,
       which strips all font attributes from `attributedStringValue`. Fix applied
       (moved to `makeNSView` only) and followed up by routing menu formatting commands
       through the active field editor plus restyling compatible markdown ranges.
 - [x] **Attributed string fragility** — the entire inline formatting system (markdown-style
-      `**bold**`, `*italic*`, `` `code` ``, `==highlight==`) is re-parsed and re-rendered
+      `**bold**`, `*italic*`, `==highlight==`) is re-parsed and re-rendered
       on every keystroke. Any code path that touches `tf.font` or `tf.textColor` after
-      initial setup can blow away the styled rendering. Follow-up pass keeps code spans
-      isolated while allowing compatible bold/italic/highlight styling to combine.
+      initial setup can blow away the styled rendering. Follow-up pass allows compatible
+      bold/italic/highlight styling to combine.
 
 ## Recurring: Tab Bar Issues
 
