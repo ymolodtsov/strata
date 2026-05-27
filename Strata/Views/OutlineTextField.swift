@@ -344,6 +344,10 @@ struct OutlineTextField: NSViewRepresentable {
 
                 // Install right-click context menu monitor for formatting
                 tf.installContextMenuMonitor()
+                tf.installSelectionRestyleObserver { [weak tf, weak self] in
+                    guard let tf, let self else { return }
+                    Self.restyleEditor(tf, parent: self.parent)
+                }
 
                 // NSTextField's shared field editor starts from stringValue, not the
                 // display attributedStringValue. Style it immediately so focusing a row
@@ -367,6 +371,7 @@ struct OutlineTextField: NSViewRepresentable {
         func controlTextDidEndEditing(_ obj: Notification) {
             if let tf = obj.object as? StrataTextField {
                 tf.removeContextMenuMonitor()
+                tf.removeSelectionRestyleObserver()
                 tf.lastStyledText = nil
                 if StrataTextField.currentEditingField === tf {
                     StrataTextField.currentEditingField = nil
@@ -505,6 +510,9 @@ class StrataTextField: NSTextField {
 
     // Context menu event monitor
     private var rightClickMonitor: Any?
+    private var selectionRestyleObserver: NSObjectProtocol?
+    private var pendingSelectionRestyle = false
+    private var isRestylingSelection = false
 
     override var intrinsicContentSize: NSSize {
         if preferredMaxLayoutWidth > 0, let cell = cell {
@@ -526,6 +534,7 @@ class StrataTextField: NSTextField {
 
     deinit {
         removeContextMenuMonitor()
+        removeSelectionRestyleObserver()
     }
 
     var onCmdEnter: (() -> Void)?
@@ -564,6 +573,41 @@ class StrataTextField: NSTextField {
         if let monitor = rightClickMonitor {
             NSEvent.removeMonitor(monitor)
             rightClickMonitor = nil
+        }
+    }
+
+    func installSelectionRestyleObserver(_ restyle: @escaping () -> Void) {
+        removeSelectionRestyleObserver()
+        guard let editor = currentEditor() as? NSTextView else { return }
+
+        selectionRestyleObserver = NotificationCenter.default.addObserver(
+            forName: NSTextView.didChangeSelectionNotification,
+            object: editor,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleSelectionRestyle(restyle)
+        }
+    }
+
+    func removeSelectionRestyleObserver() {
+        if let observer = selectionRestyleObserver {
+            NotificationCenter.default.removeObserver(observer)
+            selectionRestyleObserver = nil
+        }
+        pendingSelectionRestyle = false
+        isRestylingSelection = false
+    }
+
+    private func scheduleSelectionRestyle(_ restyle: @escaping () -> Void) {
+        guard !isRestylingSelection, !pendingSelectionRestyle else { return }
+        pendingSelectionRestyle = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pendingSelectionRestyle = false
+            self.isRestylingSelection = true
+            restyle()
+            self.isRestylingSelection = false
         }
     }
 
