@@ -486,6 +486,26 @@ struct StrataApp: App {
             // MARK: Outline
 
             CommandMenu("Outline") {
+                Button("Move Node Up") {
+                    if let field = StrataTextField.currentEditingField {
+                        field.onCmdShiftUp?()
+                    } else {
+                        activeStore?.moveSelectedUp()
+                    }
+                }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+
+                Button("Move Node Down") {
+                    if let field = StrataTextField.currentEditingField {
+                        field.onCmdShiftDown?()
+                    } else {
+                        activeStore?.moveSelectedDown()
+                    }
+                }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+
+                Divider()
+
                 Button("Zoom In") {
                     if let store = activeStore,
                        let focusedId = store.pendingFocusId ?? store.currentRoot.children.first?.id {

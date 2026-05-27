@@ -741,6 +741,16 @@ class StrataTextField: NSTextField {
             wrapHighlight()
             return true
         }
+        // Cmd+Up — move node up (Workflowy-style)
+        if event.keyCode == 126 && flags == .command {
+            onCmdShiftUp?()
+            return true
+        }
+        // Cmd+Down — move node down (Workflowy-style)
+        if event.keyCode == 125 && flags == .command {
+            onCmdShiftDown?()
+            return true
+        }
         // Cmd+Shift+Up — move node up
         if event.keyCode == 126 && flags == [.command, .shift] {
             onCmdShiftUp?()

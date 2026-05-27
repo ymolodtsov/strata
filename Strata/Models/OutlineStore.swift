@@ -577,6 +577,103 @@ class OutlineStore {
         }
     }
 
+    func moveSelectedUp() {
+        let blocks = selectedSiblingBlocks().sorted { $0.firstIndex < $1.firstIndex }
+        guard blocks.contains(where: { $0.firstIndex > 0 }) else { return }
+
+        saveUndoState()
+        var changed = false
+        for block in blocks where block.firstIndex > 0 {
+            moveSiblingBlock(block, to: block.firstIndex - 1)
+            changed = true
+        }
+
+        if changed {
+            scheduleSave()
+        }
+    }
+
+    func moveSelectedDown() {
+        let blocks = selectedSiblingBlocks().sorted { $0.firstIndex > $1.firstIndex }
+        guard blocks.contains(where: { $0.lastIndex < $0.parent.children.count - 1 }) else { return }
+
+        saveUndoState()
+        var changed = false
+        for block in blocks where block.lastIndex < block.parent.children.count - 1 {
+            moveSiblingBlock(block, to: block.firstIndex + 1)
+            changed = true
+        }
+
+        if changed {
+            scheduleSave()
+        }
+    }
+
+    private struct SelectedSiblingBlock {
+        let parent: OutlineNode
+        let nodes: [OutlineNode]
+        let firstIndex: Int
+        let lastIndex: Int
+    }
+
+    private func selectedSiblingBlocks() -> [SelectedSiblingBlock] {
+        let selected = topLevelSelectedNodes()
+        guard !selected.isEmpty else { return [] }
+
+        var entriesByParent: [UUID: (parent: OutlineNode, entries: [(index: Int, node: OutlineNode)])] = [:]
+        for node in selected {
+            guard let parent = node.parent,
+                  let index = parent.indexOfChild(node.id) else { continue }
+            entriesByParent[parent.id, default: (parent, [])].entries.append((index, node))
+        }
+
+        var blocks: [SelectedSiblingBlock] = []
+        for (_, group) in entriesByParent {
+            let entries = group.entries.sorted { $0.index < $1.index }
+            var current: [(index: Int, node: OutlineNode)] = []
+
+            for entry in entries {
+                if let previous = current.last, entry.index != previous.index + 1 {
+                    blocks.append(makeSelectedSiblingBlock(parent: group.parent, entries: current))
+                    current.removeAll()
+                }
+                current.append(entry)
+            }
+
+            if !current.isEmpty {
+                blocks.append(makeSelectedSiblingBlock(parent: group.parent, entries: current))
+            }
+        }
+
+        return blocks
+    }
+
+    private func makeSelectedSiblingBlock(
+        parent: OutlineNode,
+        entries: [(index: Int, node: OutlineNode)]
+    ) -> SelectedSiblingBlock {
+        SelectedSiblingBlock(
+            parent: parent,
+            nodes: entries.map(\.node),
+            firstIndex: entries[0].index,
+            lastIndex: entries[entries.count - 1].index
+        )
+    }
+
+    private func moveSiblingBlock(_ block: SelectedSiblingBlock, to destinationIndex: Int) {
+        for node in block.nodes.reversed() {
+            if let index = block.parent.indexOfChild(node.id) {
+                block.parent.children.remove(at: index)
+            }
+        }
+
+        let safeIndex = min(max(destinationIndex, 0), block.parent.children.count)
+        for (offset, node) in block.nodes.enumerated() {
+            node.parent = block.parent
+            block.parent.children.insert(node, at: min(safeIndex + offset, block.parent.children.count))
+        }
+    }
+
     // MARK: - Cut / Paste
 
     func cutSelected() {

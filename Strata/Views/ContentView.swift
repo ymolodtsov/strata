@@ -152,6 +152,26 @@ struct ContentView: View {
                 store.extendSelectionDown()
                 return nil
             }
+            // Cmd+Up — move selected nodes up
+            if event.keyCode == 126 && flags == .command {
+                store.moveSelectedUp()
+                return nil
+            }
+            // Cmd+Down — move selected nodes down
+            if event.keyCode == 125 && flags == .command {
+                store.moveSelectedDown()
+                return nil
+            }
+            // Cmd+Shift+Up — existing move-up alias
+            if event.keyCode == 126 && flags == [.command, .shift] {
+                store.moveSelectedUp()
+                return nil
+            }
+            // Cmd+Shift+Down — existing move-down alias
+            if event.keyCode == 125 && flags == [.command, .shift] {
+                store.moveSelectedDown()
+                return nil
+            }
             // Up — move single selection up
             if event.keyCode == 126 && flags.isEmpty {
                 store.moveSelectionUp()
