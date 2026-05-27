@@ -77,8 +77,7 @@ struct NodeRowView: View {
                 store.zoomIn(nodeId: node.id)
             }
             .onDrag {
-                store.beginDrag(nodeId: node.id)
-                return NSItemProvider(object: NSString(string: "strata-drag"))
+                dragProvider()
             }
             .help("Focus on this node")
 
@@ -188,6 +187,9 @@ struct NodeRowView: View {
         .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, store: store))
         .onHover { isHovered = $0 }
         .contentShape(Rectangle())
+        .draggableWhenSelected(isSelected) {
+            dragProvider()
+        }
         .simultaneousGesture(
             TapGesture().onEnded {
                 handleModifiedRowClick()
@@ -201,6 +203,27 @@ struct NodeRowView: View {
         guard flags.contains(.shift) || flags.contains(.command) else { return }
         store.handleNodeClick(node.id, modifiers: flags)
     }
+
+    private func dragProvider() -> NSItemProvider {
+        store.beginDrag(nodeId: node.id)
+        let count = max(store.draggedNodeIds.count, 1)
+        let label = count == 1 ? node.text : "\(count) Strata nodes"
+        return NSItemProvider(object: NSString(string: label))
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func draggableWhenSelected(
+        _ isSelected: Bool,
+        provider: @escaping () -> NSItemProvider
+    ) -> some View {
+        if isSelected {
+            self.onDrag(provider)
+        } else {
+            self
+        }
+    }
 }
 
 struct NodeDropDelegate: DropDelegate {
@@ -208,15 +231,13 @@ struct NodeDropDelegate: DropDelegate {
     let store: OutlineStore
 
     func dropEntered(info: DropInfo) {
-        guard !store.draggedNodeIds.isEmpty,
-              !store.draggedNodeIds.contains(nodeId) else { return }
+        guard store.canDrop(on: nodeId) else { return }
         store.dropTargetId = nodeId
         store.dropAbove = info.location.y < 13
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard !store.draggedNodeIds.isEmpty,
-              !store.draggedNodeIds.contains(nodeId) else {
+        guard store.canDrop(on: nodeId) else {
             return DropProposal(operation: .cancel)
         }
         store.dropTargetId = nodeId

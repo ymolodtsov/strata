@@ -732,18 +732,28 @@ class OutlineStore {
         dropTargetId = nil
     }
 
+    func canDrop(on targetId: UUID) -> Bool {
+        guard !draggedNodeIds.isEmpty else { return false }
+
+        for id in draggedNodeIds {
+            if id == targetId { return false }
+            if let node = root.find(id: id), node.find(id: targetId) != nil {
+                return false
+            }
+        }
+
+        return true
+    }
+
     func performDrop() -> Bool {
         guard let targetId = dropTargetId, !draggedNodeIds.isEmpty else {
             endDrag()
             return false
         }
 
-        // Can't drop onto self or a descendant of a dragged node
-        for id in draggedNodeIds {
-            if id == targetId { endDrag(); return false }
-            if let node = root.find(id: id), node.find(id: targetId) != nil {
-                endDrag(); return false
-            }
+        guard canDrop(on: targetId) else {
+            endDrag()
+            return false
         }
 
         // Collect top-level dragged nodes in visible order (skip children of other dragged nodes)
