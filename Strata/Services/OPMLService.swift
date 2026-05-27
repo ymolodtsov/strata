@@ -30,6 +30,11 @@ enum OPMLService {
         let pad = String(repeating: "  ", count: indent)
         var attrs = "text=\"\(escapeXML(node.text))\""
 
+        if !node.formatting.isEmpty,
+           let data = try? JSONEncoder().encode(node.formatting),
+           let json = String(data: data, encoding: .utf8) {
+            attrs += " _strata_formatting=\"\(escapeXML(json))\""
+        }
         if !node.note.isEmpty {
             attrs += " _note=\"\(escapeXML(node.note))\""
         }
@@ -109,13 +114,25 @@ private class OPMLParser: NSObject, XMLParserDelegate {
 
         guard inBody, elementName == "outline" else { return }
 
-        let text = attributeDict["text"] ?? ""
+        var text = attributeDict["text"] ?? ""
+        var formatting: [TextFormattingSpan]
+        if let json = attributeDict["_strata_formatting"],
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([TextFormattingSpan].self, from: data) {
+            formatting = decoded
+        } else {
+            formatting = []
+            let converted = Self.convertLegacyMarkdownFormatting(in: text)
+            text = converted.text
+            formatting = converted.formatting
+        }
         let note = attributeDict["_note"] ?? ""
         let isDone = attributeDict["_complete"] == "true"
         let isCollapsed = attributeDict["_collapsed"] == "true"
 
         let node = OutlineNode(
             text: text,
+            formatting: formatting,
             note: note,
             isDone: isDone,
             isExpanded: !isCollapsed
@@ -152,5 +169,46 @@ private class OPMLParser: NSObject, XMLParserDelegate {
         if inBody && elementName == "outline" {
             nodeStack.removeLast()
         }
+    }
+
+    private static func convertLegacyMarkdownFormatting(in input: String) -> (text: String, formatting: [TextFormattingSpan]) {
+        var text = input
+        var formatting: [TextFormattingSpan] = []
+
+        func apply(_ pattern: String, markerLength: Int, kind: TextFormattingKind) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            let nsText = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+            guard !matches.isEmpty else { return }
+
+            for match in matches.reversed() {
+                let current = text as NSString
+                let contentRange = match.range(at: 1)
+                let content = current.substring(with: contentRange)
+                let replacementLength = (content as NSString).length
+                let removedLength = match.range.length - replacementLength
+
+                text = current.replacingCharacters(in: match.range, with: content)
+                formatting = formatting.map { span in
+                    var shifted = span
+                    if shifted.location >= match.range.location + match.range.length {
+                        shifted.location -= removedLength
+                    }
+                    return shifted
+                }
+                formatting.append(TextFormattingSpan(kind: kind, location: match.range.location, length: replacementLength))
+            }
+        }
+
+        apply("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", markerLength: 2, kind: .bold)
+        apply("==(?=\\S)(.+?)(?<=\\S)==", markerLength: 2, kind: .highlight)
+        apply("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", markerLength: 1, kind: .italic)
+
+        return (text, formatting.sorted {
+            if $0.location == $1.location {
+                return $0.kind.rawValue < $1.kind.rawValue
+            }
+            return $0.location < $1.location
+        })
     }
 }

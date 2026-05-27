@@ -4,6 +4,7 @@ import AppKit
 struct OutlineTextField: NSViewRepresentable {
     let nodeId: UUID
     @Binding var text: String
+    @Binding var formatting: [TextFormattingSpan]
     var isDone: Bool
     var shouldFocus: Bool
     var cursorPosition: Int?
@@ -36,6 +37,8 @@ struct OutlineTextField: NSViewRepresentable {
         style.lineBreakMode = .byWordWrapping
         return style
     }()
+
+    static let formattingAttribute = NSAttributedString.Key("family.ma.strata.formattingKind")
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -142,10 +145,10 @@ struct OutlineTextField: NSViewRepresentable {
     private func applyStyle(_ tf: StrataTextField) {
         let font = Self.font
         let currentText = text
+        let currentFormatting = formatting
         let searchQ = searchQuery
         let isDone = isDone
         let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
-        let markerColor = NSColor.clear
 
         // NOTE: Do NOT set tf.font or tf.textColor here.
         // Setting tf.font strips all font attributes from attributedStringValue
@@ -160,9 +163,11 @@ struct OutlineTextField: NSViewRepresentable {
             var textWasReplaced = false
             if storage.string != currentText {
                 let range = editor.selectedRange
+                editor.undoManager?.disableUndoRegistration()
                 storage.beginEditing()
                 storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: currentText)
                 storage.endEditing()
+                editor.undoManager?.enableUndoRegistration()
                 let safeLoc = min(range.location, (currentText as NSString).length)
                 editor.setSelectedRange(NSRange(location: safeLoc, length: 0))
                 textWasReplaced = true
@@ -171,6 +176,7 @@ struct OutlineTextField: NSViewRepresentable {
             // Skip restyling if text and state haven't changed since last restyle
             if !textWasReplaced &&
                tf.lastStyledText == storage.string &&
+               tf.lastStyledFormatting == currentFormatting &&
                tf.lastStyledDone == isDone &&
                tf.lastStyledSearch == searchQ {
                 return
@@ -180,16 +186,19 @@ struct OutlineTextField: NSViewRepresentable {
             let savedRange = editor.selectedRange
             let fullRange = NSRange(location: 0, length: storage.length)
 
+            editor.undoManager?.disableUndoRegistration()
             storage.beginEditing()
             storage.addAttributes([.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle], range: fullRange)
             storage.removeAttribute(.backgroundColor, range: fullRange)
+            storage.removeAttribute(Self.formattingAttribute, range: fullRange)
             if !isDone {
-                Self.applyMarkdownAttributes(to: storage, baseFont: font, baseColor: baseColor, markerColor: markerColor)
+                Self.applyFormatting(currentFormatting, to: storage, baseFont: font)
             }
             if !searchQ.isEmpty {
                 Self.applySearchHighlight(to: storage, query: searchQ)
             }
             storage.endEditing()
+            editor.undoManager?.enableUndoRegistration()
 
             if savedRange.location + savedRange.length <= storage.length {
                 editor.setSelectedRange(savedRange)
@@ -202,6 +211,7 @@ struct OutlineTextField: NSViewRepresentable {
             ]
 
             tf.lastStyledText = storage.string
+            tf.lastStyledFormatting = currentFormatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
         } else {
@@ -215,7 +225,7 @@ struct OutlineTextField: NSViewRepresentable {
             } else {
                 styled = Self.styledAttributedString(
                     from: currentText, baseFont: font,
-                    baseColor: baseColor, markerColor: markerColor
+                    baseColor: baseColor, formatting: currentFormatting
                 )
             }
 
@@ -229,48 +239,34 @@ struct OutlineTextField: NSViewRepresentable {
 
             // Clear style cache when not editing so next edit session restyles
             tf.lastStyledText = nil
+            tf.lastStyledFormatting = nil
         }
     }
 
-    // MARK: - Markdown Styling
+    // MARK: - Rich Text Styling
 
     private static func styledAttributedString(
         from text: String,
         baseFont: NSFont,
         baseColor: NSColor,
-        markerColor: NSColor
+        formatting: [TextFormattingSpan]
     ) -> NSAttributedString {
         let attributed = NSMutableAttributedString(
             string: text,
             attributes: [.font: baseFont, .foregroundColor: baseColor, .paragraphStyle: paragraphStyle]
         )
-        applyMarkdownAttributes(to: attributed, baseFont: baseFont, baseColor: baseColor, markerColor: markerColor)
+        applyFormatting(formatting, to: attributed, baseFont: baseFont)
         return attributed
     }
 
-    static func applyMarkdownAttributes(
+    static func applyFormatting(
+        _ formatting: [TextFormattingSpan],
         to attributed: NSMutableAttributedString,
-        baseFont: NSFont,
-        baseColor: NSColor,
-        markerColor: NSColor
+        baseFont: NSFont
     ) {
-        let text = attributed.string
-        let nsText = text as NSString
+        let nsText = attributed.string as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         guard fullRange.length > 0 else { return }
-
-        func dimMarkers(matchRange: NSRange, markerLength: Int) {
-            attributed.addAttribute(
-                .foregroundColor,
-                value: markerColor,
-                range: NSRange(location: matchRange.location, length: markerLength)
-            )
-            attributed.addAttribute(
-                .foregroundColor,
-                value: markerColor,
-                range: NSRange(location: matchRange.location + matchRange.length - markerLength, length: markerLength)
-            )
-        }
 
         func applyFontTrait(_ trait: NSFontTraitMask, to range: NSRange) {
             attributed.enumerateAttribute(.font, in: range) { value, subrange, _ in
@@ -280,25 +276,21 @@ struct OutlineTextField: NSViewRepresentable {
             }
         }
 
-        func applyRegex(_ pattern: String, markerLength: Int, body: (NSRange) -> Void) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-            for match in regex.matches(in: text, range: fullRange) {
-                let contentRange = match.range(at: 1)
-                body(contentRange)
-                dimMarkers(matchRange: match.range, markerLength: markerLength)
+        for span in formatting {
+            let range = NSRange(location: span.location, length: span.length)
+            guard range.location >= 0,
+                  range.length > 0,
+                  range.location + range.length <= fullRange.length else { continue }
+
+            switch span.kind {
+            case .bold:
+                applyFontTrait(.boldFontMask, to: range)
+            case .italic:
+                applyFontTrait(.italicFontMask, to: range)
+            case .highlight:
+                attributed.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
             }
-        }
-
-        applyRegex("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", markerLength: 2) { range in
-            applyFontTrait(.boldFontMask, to: range)
-        }
-
-        applyRegex("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", markerLength: 1) { range in
-            applyFontTrait(.italicFontMask, to: range)
-        }
-
-        applyRegex("==(?=\\S)(.+?)(?<=\\S)==", markerLength: 2) { range in
-            attributed.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
+            attributed.addAttribute(formattingAttribute, value: span.kind.rawValue, range: range)
         }
     }
 
@@ -353,14 +345,23 @@ struct OutlineTextField: NSViewRepresentable {
                 // display attributedStringValue. Style it immediately so focusing a row
                 // does not make markdown markers flash or stay raw until the next edit.
                 Self.restyleEditor(tf, parent: parent)
+                if Self.convertMarkdownSyntax(in: editor) {
+                    parent.text = editor.string
+                    parent.formatting = Self.extractFormatting(from: editor.textStorage)
+                    parent.onTextChange()
+                }
             }
         }
 
         func controlTextDidChange(_ obj: Notification) {
-            guard let tf = obj.object as? StrataTextField else { return }
+            guard let tf = obj.object as? StrataTextField,
+                  let editor = tf.currentEditor() as? NSTextView else { return }
+            _ = Self.convertMarkdownSyntax(in: editor)
             let newValue = tf.stringValue
-            guard newValue != parent.text else { return }
+            let newFormatting = Self.extractFormatting(from: editor.textStorage)
+            guard newValue != parent.text || newFormatting != parent.formatting else { return }
             parent.text = newValue
+            parent.formatting = newFormatting
             parent.onTextChange()
             tf.invalidateIntrinsicContentSize()
 
@@ -373,6 +374,7 @@ struct OutlineTextField: NSViewRepresentable {
                 tf.removeContextMenuMonitor()
                 tf.removeSelectionRestyleObserver()
                 tf.lastStyledText = nil
+                tf.lastStyledFormatting = nil
                 if StrataTextField.currentEditingField === tf {
                     StrataTextField.currentEditingField = nil
                 }
@@ -390,9 +392,9 @@ struct OutlineTextField: NSViewRepresentable {
             let font = OutlineTextField.font
             let isDone = parent.isDone
             let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
-            let markerColor = NSColor.clear
             let searchQ = parent.searchQuery
 
+            editor.undoManager?.disableUndoRegistration()
             storage.beginEditing()
             storage.addAttributes([
                 .font: font,
@@ -400,13 +402,15 @@ struct OutlineTextField: NSViewRepresentable {
                 .paragraphStyle: OutlineTextField.paragraphStyle
             ], range: fullRange)
             storage.removeAttribute(.backgroundColor, range: fullRange)
+            storage.removeAttribute(OutlineTextField.formattingAttribute, range: fullRange)
             if !isDone {
-                OutlineTextField.applyMarkdownAttributes(to: storage, baseFont: font, baseColor: baseColor, markerColor: markerColor)
+                OutlineTextField.applyFormatting(parent.formatting, to: storage, baseFont: font)
             }
             if !searchQ.isEmpty {
                 OutlineTextField.applySearchHighlight(to: storage, query: searchQ)
             }
             storage.endEditing()
+            editor.undoManager?.enableUndoRegistration()
 
             if savedRange.location + savedRange.length <= storage.length {
                 editor.setSelectedRange(savedRange)
@@ -419,6 +423,7 @@ struct OutlineTextField: NSViewRepresentable {
             ]
 
             tf.lastStyledText = storage.string
+            tf.lastStyledFormatting = parent.formatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
         }
@@ -493,6 +498,104 @@ struct OutlineTextField: NSViewRepresentable {
                 return range.location + range.length >= textLength
             }
         }
+
+        @discardableResult
+        private static func convertMarkdownSyntax(in editor: NSTextView) -> Bool {
+            guard let storage = editor.textStorage else { return false }
+            var changed = false
+            changed = convertMarkdownPattern(
+                "\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*",
+                markerLength: 2,
+                kind: .bold,
+                in: editor,
+                storage: storage
+            ) || changed
+            changed = convertMarkdownPattern(
+                "==(?=\\S)(.+?)(?<=\\S)==",
+                markerLength: 2,
+                kind: .highlight,
+                in: editor,
+                storage: storage
+            ) || changed
+            changed = convertMarkdownPattern(
+                "(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)",
+                markerLength: 1,
+                kind: .italic,
+                in: editor,
+                storage: storage
+            ) || changed
+            return changed
+        }
+
+        private static func convertMarkdownPattern(
+            _ pattern: String,
+            markerLength: Int,
+            kind: TextFormattingKind,
+            in editor: NSTextView,
+            storage: NSMutableAttributedString
+        ) -> Bool {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            let text = storage.string
+            let nsText = text as NSString
+            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+            guard !matches.isEmpty else { return false }
+
+            var selection = editor.selectedRange
+            for match in matches.reversed() {
+                let contentRange = match.range(at: 1)
+                let content = nsText.substring(with: contentRange)
+                let newRange = NSRange(location: match.range.location, length: (content as NSString).length)
+                storage.replaceCharacters(in: match.range, with: content)
+                OutlineTextField.applyFormatting(
+                    [TextFormattingSpan(kind: kind, location: newRange.location, length: newRange.length)],
+                    to: storage,
+                    baseFont: OutlineTextField.font
+                )
+
+                let removedLength = match.range.length - newRange.length
+                let matchEnd = match.range.location + match.range.length
+                if selection.location >= matchEnd {
+                    selection.location -= removedLength
+                } else if selection.location > match.range.location {
+                    selection.location = min(newRange.location + newRange.length, max(newRange.location, selection.location - markerLength))
+                }
+            }
+
+            editor.setSelectedRange(NSRange(location: min(selection.location, storage.length), length: 0))
+            return true
+        }
+
+        private static func extractFormatting(from storage: NSTextStorage?) -> [TextFormattingSpan] {
+            guard let storage else { return [] }
+            var spans: [TextFormattingSpan] = []
+            let fullRange = NSRange(location: 0, length: storage.length)
+            guard fullRange.length > 0 else { return [] }
+
+            storage.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                guard range.length > 0, let font = value as? NSFont else { return }
+                let traits = NSFontManager.shared.traits(of: font)
+                if traits.contains(.boldFontMask) {
+                    spans.append(TextFormattingSpan(kind: .bold, location: range.location, length: range.length))
+                }
+                if traits.contains(.italicFontMask) {
+                    spans.append(TextFormattingSpan(kind: .italic, location: range.location, length: range.length))
+                }
+            }
+
+            storage.enumerateAttribute(OutlineTextField.formattingAttribute, in: fullRange) { value, range, _ in
+                guard range.length > 0,
+                      let rawValue = value as? String,
+                      rawValue == TextFormattingKind.highlight.rawValue else { return }
+                spans.append(TextFormattingSpan(kind: .highlight, location: range.location, length: range.length))
+            }
+
+            return spans.sorted {
+                if $0.location == $1.location {
+                    return $0.kind.rawValue < $1.kind.rawValue
+                }
+                return $0.location < $1.location
+            }
+        }
     }
 }
 
@@ -505,6 +608,7 @@ class StrataTextField: NSTextField {
 
     // Style tracking to avoid redundant restyling in updateNSView
     var lastStyledText: String?
+    var lastStyledFormatting: [TextFormattingSpan]?
     var lastStyledDone: Bool?
     var lastStyledSearch: String?
 
@@ -641,90 +745,73 @@ class StrataTextField: NSTextField {
 
     // MARK: - Formatting (Toggle)
 
-    @objc func wrapBold() { toggleWrap(prefix: "**", suffix: "**") }
-    @objc func wrapItalic() { toggleWrap(prefix: "*", suffix: "*") }
-    @objc func wrapHighlight() { toggleWrap(prefix: "==", suffix: "==") }
+    @objc func wrapBold() { toggleFormatting(.bold) }
+    @objc func wrapItalic() { toggleFormatting(.italic) }
+    @objc func wrapHighlight() { toggleFormatting(.highlight) }
 
-    /// Toggle inline formatting markers around the selection or cursor.
-    /// If the selection is already wrapped with the given prefix/suffix, unwrap it.
-    /// If no selection, toggle empty markers at the cursor position.
-    private func toggleWrap(prefix: String, suffix: String) {
+    private func toggleFormatting(_ kind: TextFormattingKind) {
         guard let editor = currentEditor() as? NSTextView,
               let storage = editor.textStorage else { return }
         let range = editor.selectedRange
-        let text = storage.string as NSString
-        let prefixLen = (prefix as NSString).length
-        let suffixLen = (suffix as NSString).length
 
-        if range.length > 0 {
-            let selectedText = text.substring(with: range)
-            let nsSelected = selectedText as NSString
+        if range.length == 0 {
+            toggleTypingAttribute(kind, in: editor)
+            return
+        }
 
-            // Case 1: Markers surround the selection (just outside it)
-            let beforeStart = range.location - prefixLen
-            let afterEnd = range.location + range.length
-            if beforeStart >= 0 && afterEnd + suffixLen <= text.length {
-                let beforeText = text.substring(with: NSRange(location: beforeStart, length: prefixLen))
-                let afterText = text.substring(with: NSRange(location: afterEnd, length: suffixLen))
-                if beforeText == prefix && afterText == suffix {
-                    // Unwrap: remove the surrounding markers
-                    let fullRange = NSRange(location: beforeStart, length: prefixLen + range.length + suffixLen)
-                    if editor.shouldChangeText(in: fullRange, replacementString: selectedText) {
-                        storage.replaceCharacters(in: fullRange, with: selectedText)
-                        editor.didChangeText()
-                        editor.setSelectedRange(NSRange(location: beforeStart, length: nsSelected.length))
-                    }
-                    return
-                }
-            }
-
-            // Case 2: Selection includes the markers at its edges
-            if nsSelected.length >= prefixLen + suffixLen {
-                let startMarker = nsSelected.substring(to: prefixLen)
-                let endMarker = nsSelected.substring(from: nsSelected.length - suffixLen)
-                if startMarker == prefix && endMarker == suffix {
-                    let inner = nsSelected.substring(with: NSRange(location: prefixLen, length: nsSelected.length - prefixLen - suffixLen))
-                    if editor.shouldChangeText(in: range, replacementString: inner) {
-                        storage.replaceCharacters(in: range, with: inner)
-                        editor.didChangeText()
-                        editor.setSelectedRange(NSRange(location: range.location, length: (inner as NSString).length))
-                    }
-                    return
-                }
-            }
-
-            // Not wrapped — wrap it
-            let wrapped = prefix + selectedText + suffix
-            if editor.shouldChangeText(in: range, replacementString: wrapped) {
-                storage.replaceCharacters(in: range, with: wrapped)
-                editor.didChangeText()
-                editor.setSelectedRange(NSRange(location: range.location + prefixLen, length: nsSelected.length))
-            }
-        } else {
-            // No selection — check if cursor is between empty markers
-            if range.location >= prefixLen && range.location + suffixLen <= text.length {
-                let before = text.substring(with: NSRange(location: range.location - prefixLen, length: prefixLen))
-                let after = text.substring(with: NSRange(location: range.location, length: suffixLen))
-                if before == prefix && after == suffix {
-                    // Remove the empty markers
-                    let markerRange = NSRange(location: range.location - prefixLen, length: prefixLen + suffixLen)
-                    if editor.shouldChangeText(in: markerRange, replacementString: "") {
-                        storage.replaceCharacters(in: markerRange, with: "")
-                        editor.didChangeText()
-                        editor.setSelectedRange(NSRange(location: range.location - prefixLen, length: 0))
-                    }
-                    return
-                }
-            }
-
-            // Insert markers and place cursor between them
-            let insertion = prefix + suffix
-            if editor.shouldChangeText(in: range, replacementString: insertion) {
-                storage.replaceCharacters(in: range, with: insertion)
-                editor.didChangeText()
-                editor.setSelectedRange(NSRange(location: range.location + prefixLen, length: 0))
+        storage.beginEditing()
+        switch kind {
+        case .bold:
+            toggleFontTrait(.boldFontMask, in: range, storage: storage)
+        case .italic:
+            toggleFontTrait(.italicFontMask, in: range, storage: storage)
+        case .highlight:
+            if storage.attribute(.backgroundColor, at: range.location, effectiveRange: nil) == nil {
+                storage.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
+                storage.addAttribute(OutlineTextField.formattingAttribute, value: kind.rawValue, range: range)
+            } else {
+                storage.removeAttribute(.backgroundColor, range: range)
+                storage.removeAttribute(OutlineTextField.formattingAttribute, range: range)
             }
         }
+        storage.endEditing()
+        editor.didChangeText()
+        editor.setSelectedRange(range)
+    }
+
+    private func toggleTypingAttribute(_ kind: TextFormattingKind, in editor: NSTextView) {
+        var attributes = editor.typingAttributes
+        let baseFont = (attributes[.font] as? NSFont) ?? OutlineTextField.font
+
+        switch kind {
+        case .bold:
+            attributes[.font] = toggledFontTrait(.boldFontMask, font: baseFont)
+        case .italic:
+            attributes[.font] = toggledFontTrait(.italicFontMask, font: baseFont)
+        case .highlight:
+            if attributes[.backgroundColor] == nil {
+                attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.3)
+            } else {
+                attributes.removeValue(forKey: .backgroundColor)
+            }
+        }
+
+        editor.typingAttributes = attributes
+    }
+
+    private func toggleFontTrait(_ trait: NSFontTraitMask, in range: NSRange, storage: NSTextStorage) {
+        storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
+            let font = (value as? NSFont) ?? OutlineTextField.font
+            storage.addAttribute(.font, value: toggledFontTrait(trait, font: font), range: subrange)
+        }
+    }
+
+    private func toggledFontTrait(_ trait: NSFontTraitMask, font: NSFont) -> NSFont {
+        let manager = NSFontManager.shared
+        if manager.traits(of: font).contains(trait) {
+            return manager.convert(font, toNotHaveTrait: trait)
+        }
+        return manager.convert(font, toHaveTrait: trait)
     }
 
     // MARK: - Key Handling
@@ -736,6 +823,16 @@ class StrataTextField: NSTextField {
         }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        // Cmd+Z / Cmd+Shift+Z — keep text undo inside the field editor
+        if event.keyCode == 6 && flags == .command {
+            currentEditor()?.undoManager?.undo()
+            return true
+        }
+        if event.keyCode == 6 && flags == [.command, .shift] {
+            currentEditor()?.undoManager?.redo()
+            return true
+        }
 
         // Tab — indent node
         if event.keyCode == 48 && flags.isEmpty {

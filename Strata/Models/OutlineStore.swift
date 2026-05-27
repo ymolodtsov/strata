@@ -15,6 +15,7 @@ class OutlineStore {
 
     private struct ClipboardNode: Codable {
         let text: String
+        let formatting: [TextFormattingSpan]
         let note: String
         let isDone: Bool
         let isExpanded: Bool
@@ -22,6 +23,7 @@ class OutlineStore {
 
         init(node: OutlineNode) {
             text = node.text
+            formatting = node.formatting
             note = node.note
             isDone = node.isDone
             isExpanded = node.isExpanded
@@ -31,6 +33,7 @@ class OutlineStore {
         func makeOutlineNode() -> OutlineNode {
             OutlineNode(
                 text: text,
+                formatting: formatting,
                 note: note,
                 isDone: isDone,
                 isExpanded: isExpanded,

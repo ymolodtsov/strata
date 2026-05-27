@@ -89,6 +89,10 @@ struct NodeRowView: View {
                     get: { node.text },
                     set: { node.text = $0 }
                 ),
+                formatting: Binding(
+                    get: { node.formatting },
+                    set: { node.formatting = $0 }
+                ),
                 isDone: node.isDone,
                 shouldFocus: store.pendingFocusId == node.id,
                 cursorPosition: store.pendingFocusId == node.id ? store.pendingCursorPosition : nil,

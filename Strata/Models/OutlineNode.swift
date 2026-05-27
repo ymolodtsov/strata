@@ -1,18 +1,40 @@
 import Foundation
 
+enum TextFormattingKind: String, Codable, Hashable {
+    case bold
+    case italic
+    case highlight
+}
+
+struct TextFormattingSpan: Codable, Hashable {
+    var kind: TextFormattingKind
+    var location: Int
+    var length: Int
+}
+
 @Observable
 class OutlineNode: Identifiable {
     let id: UUID
     var text: String
+    var formatting: [TextFormattingSpan]
     var note: String
     var isDone: Bool
     var isExpanded: Bool
     var children: [OutlineNode]
     weak var parent: OutlineNode?
 
-    init(id: UUID = UUID(), text: String = "", note: String = "", isDone: Bool = false, isExpanded: Bool = true, children: [OutlineNode] = []) {
+    init(
+        id: UUID = UUID(),
+        text: String = "",
+        formatting: [TextFormattingSpan] = [],
+        note: String = "",
+        isDone: Bool = false,
+        isExpanded: Bool = true,
+        children: [OutlineNode] = []
+    ) {
         self.id = id
         self.text = text
+        self.formatting = formatting
         self.note = note
         self.isDone = isDone
         self.isExpanded = isExpanded
@@ -50,6 +72,7 @@ class OutlineNode: Identifiable {
         let copy = OutlineNode(
             id: id,
             text: text,
+            formatting: formatting,
             note: note,
             isDone: isDone,
             isExpanded: isExpanded
@@ -67,6 +90,7 @@ class OutlineNode: Identifiable {
         let copy = OutlineNode(
             id: UUID(),
             text: text,
+            formatting: formatting,
             note: note,
             isDone: isDone,
             isExpanded: isExpanded
