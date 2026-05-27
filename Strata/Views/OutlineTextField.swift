@@ -145,7 +145,7 @@ struct OutlineTextField: NSViewRepresentable {
         let searchQ = searchQuery
         let isDone = isDone
         let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
-        let markerColor = NSColor.tertiaryLabelColor
+        let markerColor = NSColor.clear
 
         // NOTE: Do NOT set tf.font or tf.textColor here.
         // Setting tf.font strips all font attributes from attributedStringValue
@@ -390,7 +390,7 @@ struct OutlineTextField: NSViewRepresentable {
             let font = OutlineTextField.font
             let isDone = parent.isDone
             let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
-            let markerColor = NSColor.tertiaryLabelColor
+            let markerColor = NSColor.clear
             let searchQ = parent.searchQuery
 
             storage.beginEditing()
