@@ -64,7 +64,7 @@ struct NodeRowView: View {
                 }
             }
 
-            // Bullet — always present, click to zoom in, drag handle
+            // Bullet — always present, click to focus/zoom in, drag handle
             ZStack {
                 Circle()
                     .fill(Color.primary.opacity(isHovered ? 0.35 : 0.22))
@@ -73,17 +73,14 @@ struct NodeRowView: View {
             }
             .frame(width: 14, height: 22)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                store.zoomIn(nodeId: node.id)
-            }
             .onTapGesture {
-                store.handleNodeClick(node.id, modifiers: NSEvent.modifierFlags)
+                store.zoomIn(nodeId: node.id)
             }
             .onDrag {
                 store.beginDrag(nodeId: node.id)
                 return NSItemProvider(object: NSString(string: "strata-drag"))
             }
-            .help("Click to select. Shift-click selects a range. Command-click toggles. Double-click zooms in.")
+            .help("Focus on this node")
 
             Spacer().frame(width: 6)
 

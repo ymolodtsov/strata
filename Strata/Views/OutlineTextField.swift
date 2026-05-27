@@ -437,10 +437,16 @@ struct OutlineTextField: NSViewRepresentable {
                 parent.onMoveDown()
                 return true
             case #selector(NSResponder.moveUpAndModifySelection(_:)):
+                guard Self.shouldPromoteTextSelectionToNodeSelection(textView, direction: .up) else {
+                    return false
+                }
                 parent.onShiftUp()
                 control.window?.makeFirstResponder(nil)
                 return true
             case #selector(NSResponder.moveDownAndModifySelection(_:)):
+                guard Self.shouldPromoteTextSelectionToNodeSelection(textView, direction: .down) else {
+                    return false
+                }
                 parent.onShiftDown()
                 control.window?.makeFirstResponder(nil)
                 return true
@@ -460,6 +466,26 @@ struct OutlineTextField: NSViewRepresentable {
                 return true
             default:
                 return false
+            }
+        }
+
+        private enum SelectionDirection {
+            case up
+            case down
+        }
+
+        private static func shouldPromoteTextSelectionToNodeSelection(
+            _ textView: NSTextView,
+            direction: SelectionDirection
+        ) -> Bool {
+            let range = textView.selectedRange
+            let textLength = (textView.string as NSString).length
+
+            switch direction {
+            case .up:
+                return range.location == 0
+            case .down:
+                return range.location + range.length >= textLength
             }
         }
     }
@@ -679,12 +705,18 @@ class StrataTextField: NSTextField {
         }
         // Shift+Up — start block selection upward
         if event.keyCode == 126 && flags == .shift {
+            guard shouldPromoteTextSelectionToNodeSelection(.up) else {
+                return false
+            }
             onShiftUp?()
             self.window?.makeFirstResponder(nil)
             return true
         }
         // Shift+Down — start block selection downward
         if event.keyCode == 125 && flags == .shift {
+            guard shouldPromoteTextSelectionToNodeSelection(.down) else {
+                return false
+            }
             onShiftDown?()
             self.window?.makeFirstResponder(nil)
             return true
@@ -750,5 +782,23 @@ class StrataTextField: NSTextField {
         }
 
         return super.performKeyEquivalent(with: event)
+    }
+
+    private enum SelectionDirection {
+        case up
+        case down
+    }
+
+    private func shouldPromoteTextSelectionToNodeSelection(_ direction: SelectionDirection) -> Bool {
+        guard let editor = currentEditor() else { return false }
+        let range = editor.selectedRange
+        let textLength = (editor.string as NSString).length
+
+        switch direction {
+        case .up:
+            return range.location == 0
+        case .down:
+            return range.location + range.length >= textLength
+        }
     }
 }
