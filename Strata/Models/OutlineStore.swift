@@ -496,7 +496,6 @@ class OutlineStore {
     }
 
     func deleteSelected() {
-        saveUndoState()
         // Group by parent and sort by descending index to avoid invalidation
         var parentMap: [UUID: [(index: Int, nodeId: UUID)]] = [:]
         for id in selectedNodeIds {
@@ -506,6 +505,9 @@ class OutlineStore {
                   let index = parent.indexOfChild(id) else { continue }
             parentMap[parent.id, default: []].append((index, id))
         }
+        guard !parentMap.isEmpty else { return }
+
+        saveUndoState()
 
         for (_, entries) in parentMap {
             let sorted = entries.sorted { $0.index > $1.index }
@@ -536,12 +538,13 @@ class OutlineStore {
     }
 
     func toggleDoneSelected() {
+        let selected = selectedNodeIds.compactMap { root.find(id: $0) }
+        guard !selected.isEmpty else { return }
+
         saveUndoState()
-        let anyUndone = selectedNodeIds.contains { id in
-            root.find(id: id)?.isDone == false
-        }
-        for id in selectedNodeIds {
-            root.find(id: id)?.setDone(anyUndone)
+        let anyUndone = selected.contains { $0.isDone == false }
+        for node in selected {
+            node.setDone(anyUndone)
         }
         clearSelection()
         scheduleSave()
@@ -908,19 +911,21 @@ class OutlineStore {
     /// Split a node at the cursor position: text before stays, text after goes to a new sibling.
     /// When cursor is at the end this behaves like "add empty sibling".
     func splitAndInsert(after nodeId: UUID, cursorOffset: Int) {
-        saveUndoState()
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId) else { return }
 
+        saveUndoState()
         let nsText = node.text as NSString
         let safeOffset = min(cursorOffset, nsText.length)
         let beforeText = nsText.substring(to: safeOffset)
         let afterText = nsText.substring(from: safeOffset)
+        let splitFormatting = node.formatting.split(at: safeOffset, textLength: nsText.length)
 
         node.text = beforeText
+        node.formatting = splitFormatting.before
 
-        let newNode = OutlineNode(text: afterText)
+        let newNode = OutlineNode(text: afterText, formatting: splitFormatting.after)
         newNode.parent = parent
         parent.children.insert(newNode, at: index + 1)
         pendingFocusId = newNode.id
@@ -939,8 +944,14 @@ class OutlineStore {
         let node = visible[idx].node
         let prevNode = visible[idx - 1].node
         let mergePoint = (prevNode.text as NSString).length
+        let nodeLength = (node.text as NSString).length
 
         prevNode.text += node.text
+        prevNode.formatting = (
+            prevNode.formatting.normalized(forTextLength: mergePoint)
+            + node.formatting.offset(by: mergePoint, textLength: mergePoint + nodeLength)
+        )
+        .normalized(forTextLength: (prevNode.text as NSString).length)
 
         // Transfer children to the previous node
         for child in node.children {
@@ -969,9 +980,9 @@ class OutlineStore {
 
     @discardableResult
     func addChild(to nodeId: UUID) -> UUID? {
-        saveUndoState()
         guard let node = root.find(id: nodeId) else { return nil }
 
+        saveUndoState()
         let newNode = OutlineNode(text: "")
         newNode.parent = node
         node.children.insert(newNode, at: 0)
@@ -982,10 +993,18 @@ class OutlineStore {
     }
 
     func indent(nodeId: UUID) {
+        guard canIndent(nodeId: nodeId) else { return }
         saveUndoState()
         guard indentNodeWithoutUndo(nodeId: nodeId) else { return }
         pendingFocusId = nodeId
         scheduleSave()
+    }
+
+    private func canIndent(nodeId: UUID) -> Bool {
+        guard let node = root.find(id: nodeId),
+              let parent = node.parent,
+              let index = parent.indexOfChild(nodeId) else { return false }
+        return index > 0
     }
 
     @discardableResult
@@ -1004,10 +1023,21 @@ class OutlineStore {
     }
 
     func unindent(nodeId: UUID) {
+        guard canUnindent(nodeId: nodeId) else { return }
         saveUndoState()
         guard unindentNodeWithoutUndo(nodeId: nodeId) else { return }
         pendingFocusId = nodeId
         scheduleSave()
+    }
+
+    private func canUnindent(nodeId: UUID) -> Bool {
+        guard let node = root.find(id: nodeId),
+              let parent = node.parent,
+              parent.id != root.id,
+              parent.id != currentRoot.id,
+              parent.parent != nil,
+              parent.indexOfChild(nodeId) != nil else { return false }
+        return true
     }
 
     @discardableResult
@@ -1041,6 +1071,7 @@ class OutlineStore {
             .map(\.node.id)
             .filter { selectedNodeIds.contains($0) }
         guard !selected.isEmpty else { return }
+        guard selected.contains(where: { canIndent(nodeId: $0) }) else { return }
 
         saveUndoState()
         var changed = false
@@ -1059,6 +1090,7 @@ class OutlineStore {
             .filter { selectedNodeIds.contains($0) }
             .reversed()
         guard !selected.isEmpty else { return }
+        guard selected.contains(where: { canUnindent(nodeId: $0) }) else { return }
 
         saveUndoState()
         var changed = false
@@ -1072,7 +1104,6 @@ class OutlineStore {
     }
 
     func deleteNode(nodeId: UUID) {
-        saveUndoState()
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId) else { return }
@@ -1081,6 +1112,7 @@ class OutlineStore {
             return
         }
 
+        saveUndoState()
         parent.children.remove(at: index)
         pruneZoomPath()
 
@@ -1095,32 +1127,32 @@ class OutlineStore {
     }
 
     func moveUp(nodeId: UUID) {
-        saveUndoState()
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId),
               index > 0 else { return }
 
+        saveUndoState()
         parent.children.swapAt(index, index - 1)
         pendingFocusId = node.id
         scheduleSave()
     }
 
     func moveDown(nodeId: UUID) {
-        saveUndoState()
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId),
               index < parent.children.count - 1 else { return }
 
+        saveUndoState()
         parent.children.swapAt(index, index + 1)
         pendingFocusId = node.id
         scheduleSave()
     }
 
     func toggleDone(nodeId: UUID) {
-        saveUndoState()
         guard let node = root.find(id: nodeId) else { return }
+        saveUndoState()
         node.toggleDone()
         scheduleSave()
     }

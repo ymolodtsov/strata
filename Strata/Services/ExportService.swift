@@ -44,7 +44,7 @@ enum ExportService {
     private static func appendMarkdown(_ node: OutlineNode, indent: Int, into lines: inout [String]) {
         let prefix = String(repeating: "  ", count: indent)
         let checkbox = node.isDone ? "- [x] " : "- "
-        lines.append("\(prefix)\(checkbox)\(node.text)")
+        lines.append("\(prefix)\(checkbox)\(formattedMarkdown(node.text, formatting: node.formatting))")
         if !node.note.isEmpty {
             for noteLine in node.note.components(separatedBy: .newlines) {
                 lines.append("\(prefix)  \(noteLine)")
@@ -86,7 +86,7 @@ enum ExportService {
 
     private static func appendHTML(_ node: OutlineNode, into html: inout String) {
         let cls = node.isDone ? " class=\"done\"" : ""
-        html += "<li\(cls)>\(escapeHTML(node.text))"
+        html += "<li\(cls)>\(formattedHTML(node.text, formatting: node.formatting))"
         if !node.note.isEmpty {
             html += "\n<div class=\"note\">\(escapeHTML(node.note))</div>"
         }
@@ -106,5 +106,86 @@ enum ExportService {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    private static func formattedMarkdown(_ text: String, formatting: [TextFormattingSpan]) -> String {
+        renderFormatted(text, formatting: formatting) { segment, kinds in
+            var output = segment
+            for kind in kinds {
+                switch kind {
+                case .bold:
+                    output = "**\(output)**"
+                case .italic:
+                    output = "*\(output)*"
+                case .highlight:
+                    output = "==\(output)=="
+                }
+            }
+            return output
+        }
+    }
+
+    private static func formattedHTML(_ text: String, formatting: [TextFormattingSpan]) -> String {
+        renderFormatted(text, formatting: formatting) { segment, kinds in
+            var output = escapeHTML(segment)
+            for kind in kinds {
+                switch kind {
+                case .bold:
+                    output = "<strong>\(output)</strong>"
+                case .italic:
+                    output = "<em>\(output)</em>"
+                case .highlight:
+                    output = "<mark>\(output)</mark>"
+                }
+            }
+            return output
+        }
+    }
+
+    private static func renderFormatted(
+        _ text: String,
+        formatting: [TextFormattingSpan],
+        renderSegment: (String, [TextFormattingKind]) -> String
+    ) -> String {
+        let nsText = text as NSString
+        let textLength = nsText.length
+        let spans = formatting.normalized(forTextLength: textLength)
+        guard !spans.isEmpty, textLength > 0 else {
+            return renderSegment(text, [])
+        }
+
+        var boundaries: Set<Int> = [0, textLength]
+        for span in spans {
+            boundaries.insert(span.location)
+            boundaries.insert(span.location + span.length)
+        }
+
+        let sortedBoundaries = boundaries.sorted()
+        var output = ""
+
+        for index in 0..<(sortedBoundaries.count - 1) {
+            let start = sortedBoundaries[index]
+            let end = sortedBoundaries[index + 1]
+            guard end > start else { continue }
+
+            let segment = nsText.substring(with: NSRange(location: start, length: end - start))
+            let activeKinds = Set(spans
+                .filter { $0.location <= start && $0.location + $0.length >= end }
+                .map(\.kind))
+                .sorted { lhs, rhs in
+                    formattingSortOrder(lhs) < formattingSortOrder(rhs)
+                }
+            output += renderSegment(segment, activeKinds)
+        }
+
+        return output
+    }
+
+    private static func formattingSortOrder(_ kind: TextFormattingKind) -> Int {
+        switch kind {
+        case .bold: return 0
+        case .italic: return 1
+        case .highlight: return 2
+        }
     }
 }

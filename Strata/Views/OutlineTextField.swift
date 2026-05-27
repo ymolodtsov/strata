@@ -30,7 +30,6 @@ struct OutlineTextField: NSViewRepresentable {
     var onPasteNodes: () -> Void
     var searchQuery: String
 
-    private static let fontSize: CGFloat = 15
     static let font = NSFont.systemFont(ofSize: 15, weight: .regular)
     static let paragraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
@@ -270,11 +269,8 @@ struct OutlineTextField: NSViewRepresentable {
             }
         }
 
-        for span in formatting {
+        for span in formatting.normalized(forTextLength: fullRange.length) {
             let range = NSRange(location: span.location, length: span.length)
-            guard range.location >= 0,
-                  range.length > 0,
-                  range.location + range.length <= fullRange.length else { continue }
 
             switch span.kind {
             case .bold:
@@ -583,12 +579,7 @@ struct OutlineTextField: NSViewRepresentable {
                 spans.append(TextFormattingSpan(kind: .highlight, location: range.location, length: range.length))
             }
 
-            return spans.sorted {
-                if $0.location == $1.location {
-                    return $0.kind.rawValue < $1.kind.rawValue
-                }
-                return $0.location < $1.location
-            }
+            return spans.normalized(forTextLength: fullRange.length)
         }
     }
 }
@@ -812,8 +803,10 @@ class StrataTextField: NSTextField {
         case .highlight:
             if attributes[.backgroundColor] == nil {
                 attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.3)
+                attributes[OutlineTextField.formattingAttribute] = TextFormattingKind.highlight.rawValue
             } else {
                 attributes.removeValue(forKey: .backgroundColor)
+                attributes.removeValue(forKey: OutlineTextField.formattingAttribute)
             }
         }
 
@@ -944,7 +937,7 @@ class StrataTextField: NSTextField {
         // Cmd+A — second press selects all nodes
         if event.keyCode == 0 && flags == .command {
             if let editor = currentEditor() {
-                let fullRange = NSRange(location: 0, length: editor.string.count)
+                let fullRange = NSRange(location: 0, length: (editor.string as NSString).length)
                 if editor.selectedRange == fullRange {
                     onSelectAllNodes?()
                     return true

@@ -1,12 +1,15 @@
 import Foundation
 
 enum OPMLService {
+    enum ParseError: Error {
+        case invalidXML
+    }
 
     // MARK: - Parse
 
     static func parse(data: Data) throws -> OutlineNode {
         let parser = OPMLParser(data: data)
-        return parser.parse()
+        return try parser.parse()
     }
 
     // MARK: - Serialize
@@ -30,8 +33,9 @@ enum OPMLService {
         let pad = String(repeating: "  ", count: indent)
         var attrs = "text=\"\(escapeXML(node.text))\""
 
-        if !node.formatting.isEmpty,
-           let data = try? JSONEncoder().encode(node.formatting),
+        let formatting = node.formatting.normalized(forTextLength: (node.text as NSString).length)
+        if !formatting.isEmpty,
+           let data = try? JSONEncoder().encode(formatting),
            let json = String(data: data, encoding: .utf8) {
             attrs += " _strata_formatting=\"\(escapeXML(json))\""
         }
@@ -83,10 +87,12 @@ private class OPMLParser: NSObject, XMLParserDelegate {
         super.init()
     }
 
-    func parse() -> OutlineNode {
+    func parse() throws -> OutlineNode {
         let parser = XMLParser(data: data)
         parser.delegate = self
-        parser.parse()
+        guard parser.parse() else {
+            throw parser.parserError ?? OPMLService.ParseError.invalidXML
+        }
         // Apply parsed title to root
         if !titleBuffer.isEmpty {
             root.text = titleBuffer
@@ -119,12 +125,12 @@ private class OPMLParser: NSObject, XMLParserDelegate {
         if let json = attributeDict["_strata_formatting"],
            let data = json.data(using: .utf8),
            let decoded = try? JSONDecoder().decode([TextFormattingSpan].self, from: data) {
-            formatting = decoded
+            formatting = decoded.normalized(forTextLength: (text as NSString).length)
         } else {
             formatting = []
             let converted = Self.convertLegacyMarkdownFormatting(in: text)
             text = converted.text
-            formatting = converted.formatting
+            formatting = converted.formatting.normalized(forTextLength: (text as NSString).length)
         }
         let note = attributeDict["_note"] ?? ""
         let isDone = attributeDict["_complete"] == "true"
@@ -175,7 +181,7 @@ private class OPMLParser: NSObject, XMLParserDelegate {
         var text = input
         var formatting: [TextFormattingSpan] = []
 
-        func apply(_ pattern: String, markerLength: Int, kind: TextFormattingKind) {
+        func apply(_ pattern: String, kind: TextFormattingKind) {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
             let nsText = text as NSString
             let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
@@ -200,15 +206,10 @@ private class OPMLParser: NSObject, XMLParserDelegate {
             }
         }
 
-        apply("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", markerLength: 2, kind: .bold)
-        apply("==(?=\\S)(.+?)(?<=\\S)==", markerLength: 2, kind: .highlight)
-        apply("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", markerLength: 1, kind: .italic)
+        apply("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", kind: .bold)
+        apply("==(?=\\S)(.+?)(?<=\\S)==", kind: .highlight)
+        apply("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", kind: .italic)
 
-        return (text, formatting.sorted {
-            if $0.location == $1.location {
-                return $0.kind.rawValue < $1.kind.rawValue
-            }
-            return $0.location < $1.location
-        })
+        return (text, formatting.normalized(forTextLength: (text as NSString).length))
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var store: OutlineStore
     @State private var eventMonitor: Any?
+    @State private var hostingWindow: NSWindow?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -94,7 +95,11 @@ struct ContentView: View {
         }
         .navigationTitle(store.documentTitle)
         .background(Color(.textBackgroundColor))
-        .background(WindowConfigurator(store: store, url: store.currentFilePath))
+        .background(WindowConfigurator(store: store, url: store.currentFilePath) { window in
+            if hostingWindow != window {
+                hostingWindow = window
+            }
+        })
         .frame(minWidth: 400, minHeight: 300)
         .onAppear {
             removeEventMonitor()
@@ -112,8 +117,11 @@ struct ContentView: View {
 
     private func installEventMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Only handle events for the key window (avoid cross-tab interference)
-            guard event.window?.isKeyWindow == true else { return event }
+            // Only handle events for this view's owning window, so hidden tabs do not
+            // mutate their stores when the active tab receives a shortcut.
+            guard let hostingWindow,
+                  event.window === hostingWindow,
+                  hostingWindow.isKeyWindow else { return event }
 
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
@@ -249,6 +257,7 @@ struct ContentView: View {
 struct WindowConfigurator: NSViewRepresentable {
     let store: OutlineStore
     let url: URL?
+    var onWindowChange: (NSWindow?) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -257,6 +266,7 @@ struct WindowConfigurator: NSViewRepresentable {
             if let window = view.window {
                 SessionState.associate(store: store, with: window)
             }
+            onWindowChange(view.window)
         }
         return view
     }
@@ -276,6 +286,7 @@ struct WindowConfigurator: NSViewRepresentable {
                 }
                 SessionState.associate(store: store, with: window)
             }
+            onWindowChange(nsView.window)
         }
     }
 }
