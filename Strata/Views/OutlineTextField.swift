@@ -104,13 +104,7 @@ struct OutlineTextField: NSViewRepresentable {
         }
 
         nsView.preferredMaxLayoutWidth = width
-
-        if let cell = nsView.cell {
-            let rect = NSRect(x: 0, y: 0, width: width, height: CGFloat.greatestFiniteMagnitude)
-            let size = cell.cellSize(forBounds: rect)
-            return CGSize(width: width, height: max(size.height, 22))
-        }
-        return nil
+        return CGSize(width: width, height: nsView.measuredTextHeight(for: width))
     }
 
     func updateNSView(_ nsView: StrataTextField, context: Context) {
@@ -619,12 +613,39 @@ class StrataTextField: NSTextField {
     private var isRestylingSelection = false
 
     override var intrinsicContentSize: NSSize {
-        if preferredMaxLayoutWidth > 0, let cell = cell {
-            let rect = NSRect(x: 0, y: 0, width: preferredMaxLayoutWidth, height: CGFloat.greatestFiniteMagnitude)
-            let size = cell.cellSize(forBounds: rect)
-            return NSSize(width: NSView.noIntrinsicMetric, height: max(size.height, 22))
+        if preferredMaxLayoutWidth > 0 {
+            return NSSize(
+                width: NSView.noIntrinsicMetric,
+                height: measuredTextHeight(for: preferredMaxLayoutWidth)
+            )
         }
         return super.intrinsicContentSize
+    }
+
+    func measuredTextHeight(for width: CGFloat) -> CGFloat {
+        let measurementWidth = max(width, 1)
+        let attributed: NSAttributedString
+
+        if let editor = currentEditor() as? NSTextView, let storage = editor.textStorage {
+            attributed = storage
+        } else if attributedStringValue.length > 0 {
+            attributed = attributedStringValue
+        } else {
+            attributed = NSAttributedString(
+                string: stringValue.isEmpty ? " " : stringValue,
+                attributes: [
+                    .font: font ?? OutlineTextField.font,
+                    .paragraphStyle: OutlineTextField.paragraphStyle
+                ]
+            )
+        }
+
+        let rect = attributed.boundingRect(
+            with: NSSize(width: measurementWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+
+        return max(ceil(rect.height), 22)
     }
 
     override func layout() {
