@@ -1,0 +1,10 @@
+.DS_Store
+.claude/
+DerivedData/
+build/
+*.xcuserdata/
+*.xcuserstate
+*.moved-aside
+*.app/
+*.dSYM/
+*.ipa
