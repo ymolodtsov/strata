@@ -195,6 +195,12 @@ struct OutlineTextField: NSViewRepresentable {
                 editor.setSelectedRange(savedRange)
             }
 
+            editor.typingAttributes = [
+                .font: font,
+                .foregroundColor: baseColor,
+                .paragraphStyle: Self.paragraphStyle
+            ]
+
             tf.lastStyledText = storage.string
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
@@ -334,9 +340,15 @@ struct OutlineTextField: NSViewRepresentable {
                 editor.textContainer?.widthTracksTextView = true
                 editor.isHorizontallyResizable = false
                 editor.isVerticallyResizable = true
+                editor.isRichText = true
 
                 // Install right-click context menu monitor for formatting
                 tf.installContextMenuMonitor()
+
+                // NSTextField's shared field editor starts from stringValue, not the
+                // display attributedStringValue. Style it immediately so focusing a row
+                // does not make markdown markers flash or stay raw until the next edit.
+                Self.restyleEditor(tf, parent: parent)
             }
         }
 
@@ -394,6 +406,12 @@ struct OutlineTextField: NSViewRepresentable {
             if savedRange.location + savedRange.length <= storage.length {
                 editor.setSelectedRange(savedRange)
             }
+
+            editor.typingAttributes = [
+                .font: font,
+                .foregroundColor: baseColor,
+                .paragraphStyle: OutlineTextField.paragraphStyle
+            ]
 
             tf.lastStyledText = storage.string
             tf.lastStyledDone = isDone
