@@ -737,8 +737,12 @@ class StrataTextField: NSTextField {
             onZoomIn?()
             return true
         }
-        // Cmd+V — multi-line paste creates nodes; single-line is normal paste
+        // Cmd+V — outline-node or multi-line paste creates nodes; single-line text is normal paste
         if event.keyCode == 9 && flags == .command {
+            if NSPasteboard.general.data(forType: OutlineStore.nodePasteboardType) != nil {
+                onPasteNodes?()
+                return true
+            }
             if let text = NSPasteboard.general.string(forType: .string),
                text.contains("\n") || text.contains("\r") {
                 onPasteNodes?()

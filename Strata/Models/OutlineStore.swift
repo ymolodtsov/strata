@@ -3,9 +3,49 @@ import AppKit
 
 @Observable
 class OutlineStore {
+    static let nodePasteboardType = NSPasteboard.PasteboardType("family.ma.strata.nodes")
+
     /// Weak set of all living OutlineStore instances, used to collect open document
     /// paths for session state persistence on quit.
     static let openStores = NSHashTable<OutlineStore>.weakObjects()
+
+    private struct ClipboardPayload: Codable {
+        let nodes: [ClipboardNode]
+    }
+
+    private struct ClipboardNode: Codable {
+        let text: String
+        let note: String
+        let isDone: Bool
+        let isExpanded: Bool
+        let children: [ClipboardNode]
+
+        init(node: OutlineNode) {
+            text = node.text
+            note = node.note
+            isDone = node.isDone
+            isExpanded = node.isExpanded
+            children = node.children.map(ClipboardNode.init)
+        }
+
+        func makeOutlineNode() -> OutlineNode {
+            OutlineNode(
+                text: text,
+                note: note,
+                isDone: isDone,
+                isExpanded: isExpanded,
+                children: children.map { $0.makeOutlineNode() }
+            )
+        }
+
+        func appendPlainTextLines(to lines: inout [String], depth: Int) {
+            let indent = String(repeating: "\t", count: depth)
+            lines.append("\(indent)\(text)")
+            for child in children {
+                child.appendPlainTextLines(to: &lines, depth: depth + 1)
+            }
+        }
+    }
 
     var root: OutlineNode
     var zoomPath: [UUID] = []
@@ -505,16 +545,36 @@ class OutlineStore {
     }
 
     func copySelectedAsText() {
-        let nodes = visibleNodes()
+        let nodes = topLevelSelectedNodes()
+        guard !nodes.isEmpty else { return }
+
+        let payload = ClipboardPayload(nodes: nodes.map(ClipboardNode.init))
         var lines: [String] = []
-        for (node, depth) in nodes {
-            guard selectedNodeIds.contains(node.id) else { continue }
-            let indent = String(repeating: "\t", count: depth)
-            lines.append("\(indent)\(node.text)")
+        for node in payload.nodes {
+            node.appendPlainTextLines(to: &lines, depth: 0)
         }
-        let text = lines.joined(separator: "\n")
+
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        if let data = try? JSONEncoder().encode(payload) {
+            NSPasteboard.general.setData(data, forType: Self.nodePasteboardType)
+        }
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+
+    private func topLevelSelectedNodes() -> [OutlineNode] {
+        visibleNodes().compactMap { item in
+            let node = item.node
+            guard selectedNodeIds.contains(node.id) else { return nil }
+
+            var ancestor = node.parent
+            while let current = ancestor, current.id != root.id {
+                if selectedNodeIds.contains(current.id) {
+                    return nil
+                }
+                ancestor = current.parent
+            }
+            return node
+        }
     }
 
     // MARK: - Cut / Paste
@@ -525,15 +585,42 @@ class OutlineStore {
     }
 
     func pasteNodes(after nodeId: UUID) {
+        if pasteOutlineNodes(after: nodeId) {
+            return
+        }
+
         guard let pasteText = NSPasteboard.general.string(forType: .string),
-              !pasteText.isEmpty else { return }
-
-        saveUndoState()
-
-        guard let refNode = root.find(id: nodeId),
+              !pasteText.isEmpty,
+              let refNode = root.find(id: nodeId),
               let refParent = refNode.parent,
               let refIndex = refParent.indexOfChild(nodeId) else { return }
 
+        let topLevel = nodesFromPlainText(pasteText)
+        guard !topLevel.isEmpty else { return }
+
+        saveUndoState()
+        insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        scheduleSave()
+    }
+
+    @discardableResult
+    private func pasteOutlineNodes(after nodeId: UUID) -> Bool {
+        guard let refNode = root.find(id: nodeId),
+              let refParent = refNode.parent,
+              let refIndex = refParent.indexOfChild(nodeId),
+              let data = NSPasteboard.general.data(forType: Self.nodePasteboardType),
+              let payload = try? JSONDecoder().decode(ClipboardPayload.self, from: data) else { return false }
+
+        let topLevel = payload.nodes.map { $0.makeOutlineNode() }
+        guard !topLevel.isEmpty else { return false }
+
+        saveUndoState()
+        insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        scheduleSave()
+        return true
+    }
+
+    private func nodesFromPlainText(_ pasteText: String) -> [OutlineNode] {
         let lines = pasteText.components(separatedBy: .newlines)
         var items: [(text: String, indent: Int)] = []
         for line in lines {
@@ -549,7 +636,7 @@ class OutlineStore {
             items.append((trimmed, indent))
         }
 
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty else { return [] }
 
         let baseIndent = items[0].indent
         items = items.map { ($0.text, max(0, $0.indent - baseIndent)) }
@@ -572,15 +659,17 @@ class OutlineStore {
             stack.append((newNode, item.indent))
         }
 
-        for (offset, node) in topLevel.enumerated() {
-            node.parent = refParent
-            refParent.children.insert(node, at: refIndex + 1 + offset)
-        }
+        return topLevel
+    }
 
+    private func insertNodes(_ topLevel: [OutlineNode], into parent: OutlineNode, at index: Int) {
+        for (offset, node) in topLevel.enumerated() {
+            node.parent = parent
+            parent.children.insert(node, at: min(index + offset, parent.children.count))
+        }
         if let last = topLevel.last {
             pendingFocusId = last.id
         }
-        scheduleSave()
     }
 
     func pasteAfterSelection() {
