@@ -192,13 +192,15 @@ struct ContentView: View {
                 store.pasteAfterSelection()
                 return nil
             }
-            // Tab in selection — indent all selected (future: bulk indent)
+            // Tab in selection — indent selected nodes as a block
             if event.keyCode == 48 && flags.isEmpty {
-                return nil // consume, no-op for now
+                store.indentSelected()
+                return nil
             }
-            // Shift+Tab in selection — unindent (future: bulk unindent)
+            // Shift+Tab in selection — unindent selected nodes as a block
             if event.keyCode == 48 && flags == .shift {
-                return nil // consume, no-op for now
+                store.unindentSelected()
+                return nil
             }
             // Any printable character — exit selection, start editing
             // (exclude control characters like Tab=0x09, Escape=0x1B, etc.)
@@ -230,8 +232,7 @@ struct WindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            // .preferred makes new windows from the same WindowGroup merge as tabs
-            view.window?.tabbingMode = .preferred
+            WindowTabCoordinator.configure(view.window)
         }
         return view
     }
@@ -239,7 +240,7 @@ struct WindowConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             nsView.window?.representedURL = url
-            nsView.window?.tabbingMode = .preferred
+            WindowTabCoordinator.configure(nsView.window)
         }
     }
 }

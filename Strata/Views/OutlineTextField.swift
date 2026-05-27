@@ -253,88 +253,66 @@ struct OutlineTextField: NSViewRepresentable {
         let fullRange = NSRange(location: 0, length: nsText.length)
         guard fullRange.length > 0 else { return }
 
-        var styledRanges: [NSRange] = []
+        var codeRanges: [NSRange] = []
 
-        // 1. Code spans: `text`
-        if let codeRegex = try? NSRegularExpression(pattern: "`([^`]+)`") {
-            for match in codeRegex.matches(in: text, range: fullRange) {
-                let matchRange = match.range
+        func intersectsCode(_ range: NSRange) -> Bool {
+            codeRanges.contains { NSIntersectionRange($0, range).length > 0 }
+        }
+
+        func dimMarkers(matchRange: NSRange, markerLength: Int) {
+            attributed.addAttribute(
+                .foregroundColor,
+                value: markerColor,
+                range: NSRange(location: matchRange.location, length: markerLength)
+            )
+            attributed.addAttribute(
+                .foregroundColor,
+                value: markerColor,
+                range: NSRange(location: matchRange.location + matchRange.length - markerLength, length: markerLength)
+            )
+        }
+
+        func applyFontTrait(_ trait: NSFontTraitMask, to range: NSRange) {
+            attributed.enumerateAttribute(.font, in: range) { value, subrange, _ in
+                let currentFont = (value as? NSFont) ?? baseFont
+                let converted = NSFontManager.shared.convert(currentFont, toHaveTrait: trait)
+                attributed.addAttribute(.font, value: converted, range: subrange)
+            }
+        }
+
+        func applyRegex(_ pattern: String, markerLength: Int, body: (NSRange) -> Void) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            for match in regex.matches(in: text, range: fullRange) {
                 let contentRange = match.range(at: 1)
+                guard !intersectsCode(contentRange) else { continue }
+                body(contentRange)
+                dimMarkers(matchRange: match.range, markerLength: markerLength)
+            }
+        }
 
+        if let codeRegex = try? NSRegularExpression(pattern: "`([^`\\n]+)`") {
+            for match in codeRegex.matches(in: text, range: fullRange) {
+                let contentRange = match.range(at: 1)
                 let codeFont = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
                 attributed.addAttributes([
                     .font: codeFont,
                     .backgroundColor: NSColor.quaternaryLabelColor
                 ], range: contentRange)
-
-                // Dim the backtick markers
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location, length: 1))
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location + matchRange.length - 1, length: 1))
-
-                styledRanges.append(matchRange)
+                dimMarkers(matchRange: match.range, markerLength: 1)
+                codeRanges.append(match.range)
             }
         }
 
-        // 2. Bold: **text**
-        if let boldRegex = try? NSRegularExpression(pattern: "\\*\\*(.+?)\\*\\*") {
-            for match in boldRegex.matches(in: text, range: fullRange) {
-                let matchRange = match.range
-                if styledRanges.contains(where: { NSIntersectionRange($0, matchRange).length > 0 }) { continue }
-
-                let contentRange = match.range(at: 1)
-                let boldFont = NSFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
-                attributed.addAttribute(.font, value: boldFont, range: contentRange)
-
-                // Dim the ** markers
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location, length: 2))
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location + matchRange.length - 2, length: 2))
-
-                styledRanges.append(matchRange)
-            }
+        applyRegex("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", markerLength: 2) { range in
+            applyFontTrait(.boldFontMask, to: range)
         }
 
-        // 3. Italic: *text* (single *, not **)
-        if let italicRegex = try? NSRegularExpression(pattern: "(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)") {
-            for match in italicRegex.matches(in: text, range: fullRange) {
-                let matchRange = match.range
-                if styledRanges.contains(where: { NSIntersectionRange($0, matchRange).length > 0 }) { continue }
-
-                let contentRange = match.range(at: 1)
-                let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-                attributed.addAttribute(.font, value: italicFont, range: contentRange)
-
-                // Dim the * markers
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location, length: 1))
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location + matchRange.length - 1, length: 1))
-
-                styledRanges.append(matchRange)
-            }
+        applyRegex("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", markerLength: 1) { range in
+            applyFontTrait(.italicFontMask, to: range)
         }
 
-        // 4. Highlight: ==text==
-        if let highlightRegex = try? NSRegularExpression(pattern: "==(.+?)==") {
-            for match in highlightRegex.matches(in: text, range: fullRange) {
-                let matchRange = match.range
-                if styledRanges.contains(where: { NSIntersectionRange($0, matchRange).length > 0 }) { continue }
-
-                let contentRange = match.range(at: 1)
-                attributed.addAttribute(.backgroundColor,
-                    value: NSColor.systemYellow.withAlphaComponent(0.3), range: contentRange)
-
-                // Dim the == markers
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location, length: 2))
-                attributed.addAttribute(.foregroundColor, value: markerColor,
-                    range: NSRange(location: matchRange.location + matchRange.length - 2, length: 2))
-
-                styledRanges.append(matchRange)
-            }
+        applyRegex("==(?=\\S)(.+?)(?<=\\S)==", markerLength: 2) { range in
+            attributed.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
         }
     }
 
@@ -370,6 +348,7 @@ struct OutlineTextField: NSViewRepresentable {
             // Configure field editor: fix text shift + enable wrapping
             if let tf = obj.object as? StrataTextField,
                let editor = tf.currentEditor() as? NSTextView {
+                StrataTextField.currentEditingField = tf
                 editor.textContainerInset = .zero
                 editor.textContainer?.lineFragmentPadding = 0
                 editor.textContainer?.widthTracksTextView = true
@@ -397,6 +376,9 @@ struct OutlineTextField: NSViewRepresentable {
             if let tf = obj.object as? StrataTextField {
                 tf.removeContextMenuMonitor()
                 tf.lastStyledText = nil
+                if StrataTextField.currentEditingField === tf {
+                    StrataTextField.currentEditingField = nil
+                }
             }
         }
 
@@ -488,6 +470,8 @@ struct OutlineTextField: NSViewRepresentable {
 // MARK: - StrataTextField
 
 class StrataTextField: NSTextField {
+    static weak var currentEditingField: StrataTextField?
+
     private var lastKnownWidth: CGFloat = 0
 
     // Style tracking to avoid redundant restyling in updateNSView

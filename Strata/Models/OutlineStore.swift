@@ -321,6 +321,47 @@ class OutlineStore {
         NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
+    func selectRange(to nodeId: UUID) {
+        if selectionAnchorId == nil {
+            selectionAnchorId = firstSelectedVisibleNodeId() ?? nodeId
+        }
+        selectionCursorId = nodeId
+        recomputeSelection()
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    func toggleSelection(nodeId: UUID) {
+        if selectedNodeIds.contains(nodeId) {
+            selectedNodeIds.remove(nodeId)
+            if selectedNodeIds.isEmpty {
+                clearSelection()
+            } else {
+                selectionAnchorId = firstSelectedVisibleNodeId()
+                selectionCursorId = nodeId
+            }
+        } else {
+            selectedNodeIds.insert(nodeId)
+            selectionAnchorId = nodeId
+            selectionCursorId = nodeId
+        }
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    func handleNodeClick(_ nodeId: UUID, modifiers: NSEvent.ModifierFlags) {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.shift) {
+            selectRange(to: nodeId)
+        } else if flags.contains(.command) {
+            toggleSelection(nodeId: nodeId)
+        } else {
+            selectNode(nodeId)
+        }
+    }
+
+    private func firstSelectedVisibleNodeId() -> UUID? {
+        visibleNodes().first(where: { selectedNodeIds.contains($0.node.id) })?.node.id
+    }
+
     /// Start block selection from a text field by pressing Shift+Up
     func startSelectionUp(from nodeId: UUID) {
         let visible = visibleNodes()
@@ -743,29 +784,42 @@ class OutlineStore {
 
     func indent(nodeId: UUID) {
         saveUndoState()
+        guard indentNodeWithoutUndo(nodeId: nodeId) else { return }
+        pendingFocusId = nodeId
+        scheduleSave()
+    }
+
+    @discardableResult
+    private func indentNodeWithoutUndo(nodeId: UUID) -> Bool {
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId),
-              index > 0 else { return }
+              index > 0 else { return false }
 
         let newParent = parent.children[index - 1]
         parent.children.remove(at: index)
         node.parent = newParent
         newParent.children.append(node)
         newParent.isExpanded = true
-        pendingFocusId = node.id
-        scheduleSave()
+        return true
     }
 
     func unindent(nodeId: UUID) {
         saveUndoState()
+        guard unindentNodeWithoutUndo(nodeId: nodeId) else { return }
+        pendingFocusId = nodeId
+        scheduleSave()
+    }
+
+    @discardableResult
+    private func unindentNodeWithoutUndo(nodeId: UUID) -> Bool {
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               parent.id != root.id,
               parent.id != currentRoot.id,
               let grandparent = parent.parent,
               let parentIndex = grandparent.indexOfChild(parent.id),
-              let nodeIndex = parent.indexOfChild(nodeId) else { return }
+              let nodeIndex = parent.indexOfChild(nodeId) else { return false }
 
         let siblingsAfter = Array(parent.children[(nodeIndex + 1)...])
         parent.children.removeSubrange(nodeIndex...)
@@ -780,8 +834,42 @@ class OutlineStore {
 
         node.parent = grandparent
         grandparent.children.insert(node, at: parentIndex + 1)
-        pendingFocusId = node.id
-        scheduleSave()
+        return true
+    }
+
+    func indentSelected() {
+        let selected = visibleNodes()
+            .map(\.node.id)
+            .filter { selectedNodeIds.contains($0) }
+        guard !selected.isEmpty else { return }
+
+        saveUndoState()
+        var changed = false
+        for id in selected {
+            changed = indentNodeWithoutUndo(nodeId: id) || changed
+        }
+        if changed {
+            clearSelection()
+            scheduleSave()
+        }
+    }
+
+    func unindentSelected() {
+        let selected = visibleNodes()
+            .map(\.node.id)
+            .filter { selectedNodeIds.contains($0) }
+            .reversed()
+        guard !selected.isEmpty else { return }
+
+        saveUndoState()
+        var changed = false
+        for id in selected {
+            changed = unindentNodeWithoutUndo(nodeId: id) || changed
+        }
+        if changed {
+            clearSelection()
+            scheduleSave()
+        }
     }
 
     func deleteNode(nodeId: UUID) {

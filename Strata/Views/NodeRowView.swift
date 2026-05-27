@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 struct NodeRowView: View {
@@ -72,13 +73,17 @@ struct NodeRowView: View {
             }
             .frame(width: 14, height: 22)
             .contentShape(Rectangle())
-            .onTapGesture {
+            .onTapGesture(count: 2) {
                 store.zoomIn(nodeId: node.id)
+            }
+            .onTapGesture {
+                store.handleNodeClick(node.id, modifiers: NSEvent.modifierFlags)
             }
             .onDrag {
                 store.beginDrag(nodeId: node.id)
                 return NSItemProvider(object: NSString(string: "strata-drag"))
             }
+            .help("Click to select. Shift-click selects a range. Command-click toggles. Double-click zooms in.")
 
             Spacer().frame(width: 6)
 
@@ -186,7 +191,18 @@ struct NodeRowView: View {
         .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, store: store))
         .onHover { isHovered = $0 }
         .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                handleModifiedRowClick()
+            }
+        )
         .id(node.id)
+    }
+
+    private func handleModifiedRowClick() {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.shift) || flags.contains(.command) else { return }
+        store.handleNodeClick(node.id, modifiers: flags)
     }
 }
 

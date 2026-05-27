@@ -2,6 +2,27 @@ import SwiftUI
 
 // MARK: - Session State (persists open document tabs across launches)
 
+enum WindowTabCoordinator {
+    static weak var requestedParentWindow: NSWindow?
+
+    static func requestNextWindowAsTab() {
+        requestedParentWindow = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
+    }
+
+    static func configure(_ window: NSWindow?) {
+        guard let window else { return }
+        window.tabbingMode = .preferred
+
+        guard let parent = requestedParentWindow,
+              parent != window,
+              parent.isVisible else { return }
+
+        requestedParentWindow = nil
+        parent.addTabbedWindow(window, ordered: .above)
+        window.makeKeyAndOrderFront(nil)
+    }
+}
+
 enum SessionState {
     private static let key = "openDocumentPaths"
 
@@ -190,6 +211,7 @@ struct DocumentWindowView: View {
             if !remaining.isEmpty {
                 SessionState.pendingRestoreURLs = remaining
                 for _ in remaining {
+                    WindowTabCoordinator.requestNextWindowAsTab()
                     openWindow(id: "main")
                 }
             }
@@ -225,6 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = true
+
         // Save session state when the app loses focus (covers force-quit scenarios)
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
@@ -284,6 +308,13 @@ struct StrataApp: App {
             }
 
             // MARK: File — Open / Recent
+
+            CommandGroup(replacing: .newItem) {
+                Button("New Tab") {
+                    openUntitledTab()
+                }
+                .keyboardShortcut("n")
+            }
 
             CommandGroup(after: .newItem) {
                 Divider()
@@ -355,22 +386,22 @@ struct StrataApp: App {
 
             CommandMenu("Format") {
                 Button("Bold") {
-                    NSApp.sendAction(#selector(StrataTextField.wrapBold), to: nil, from: nil)
+                    StrataTextField.currentEditingField?.wrapBold()
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("Italic") {
-                    NSApp.sendAction(#selector(StrataTextField.wrapItalic), to: nil, from: nil)
+                    StrataTextField.currentEditingField?.wrapItalic()
                 }
                 .keyboardShortcut("i", modifiers: .command)
 
                 Button("Code") {
-                    NSApp.sendAction(#selector(StrataTextField.wrapCode), to: nil, from: nil)
+                    StrataTextField.currentEditingField?.wrapCode()
                 }
                 .keyboardShortcut("e", modifiers: .command)
 
                 Button("Highlight") {
-                    NSApp.sendAction(#selector(StrataTextField.wrapHighlight), to: nil, from: nil)
+                    StrataTextField.currentEditingField?.wrapHighlight()
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
             }
@@ -453,6 +484,17 @@ struct StrataApp: App {
         openURLAsTab(url)
     }
 
+    private func openUntitledTab() {
+        if let store = activeStore, store.currentFilePath == nil, store.root.children.count == 1, store.root.children[0].text.isEmpty {
+            return
+        }
+
+        if let openWindow = openWindowAction {
+            WindowTabCoordinator.requestNextWindowAsTab()
+            openWindow(id: "main")
+        }
+    }
+
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
     private func openURLAsTab(_ url: URL) {
         if let store = activeStore, store.currentFilePath == nil {
@@ -460,6 +502,7 @@ struct StrataApp: App {
             store.loadFile(from: url)
         } else if let openWindow = openWindowAction {
             // Current window has a file — open in a new tab
+            WindowTabCoordinator.requestNextWindowAsTab()
             SessionState.pendingRestoreURLs.append(url)
             openWindow(id: "main")
         } else {
