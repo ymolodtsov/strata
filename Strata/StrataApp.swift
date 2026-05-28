@@ -67,6 +67,35 @@ enum WindowTabCoordinator {
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
+        suppressTitlebarScrollEdgeRule(in: window)
+        DispatchQueue.main.async {
+            suppressTitlebarScrollEdgeRule(in: window)
+        }
+    }
+
+    private static func suppressTitlebarScrollEdgeRule(in window: NSWindow) {
+        guard let frameView = window.contentView?.superview else { return }
+        hideScrollEdgeRule(in: frameView, insideTitlebarBackground: false)
+    }
+
+    @discardableResult
+    private static func hideScrollEdgeRule(in view: NSView, insideTitlebarBackground: Bool) -> Bool {
+        let className = NSStringFromClass(type(of: view))
+        let isTitlebarBackground = insideTitlebarBackground || className.contains("NSTitlebarBackgroundView")
+        var foundRule = false
+
+        // Tahoe's titlebar scroll edge can leave a hard 1px rule after tabbing.
+        if isTitlebarBackground && className.contains("_NSLayerBasedFillColorView") {
+            view.isHidden = true
+            view.alphaValue = 0
+            foundRule = true
+        }
+
+        for subview in view.subviews {
+            foundRule = hideScrollEdgeRule(in: subview, insideTitlebarBackground: isTitlebarBackground) || foundRule
+        }
+
+        return foundRule
     }
 }
 
