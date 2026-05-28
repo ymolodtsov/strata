@@ -789,19 +789,20 @@ class OutlineStore {
         deleteSelected() // already saves undo state
     }
 
-    func pasteNodes(after nodeId: UUID, selectInserted: Bool = false) {
+    @discardableResult
+    func pasteNodes(after nodeId: UUID, selectInserted: Bool = false) -> Bool {
         if pasteOutlineNodes(after: nodeId, selectInserted: selectInserted) {
-            return
+            return true
         }
 
         guard let pasteText = NSPasteboard.general.string(forType: .string),
               !pasteText.isEmpty,
               let refNode = root.find(id: nodeId),
               let refParent = refNode.parent,
-              let refIndex = refParent.indexOfChild(nodeId) else { return }
+              let refIndex = refParent.indexOfChild(nodeId) else { return false }
 
         let topLevel = nodesFromPlainText(pasteText)
-        guard !topLevel.isEmpty else { return }
+        guard !topLevel.isEmpty else { return false }
 
         saveUndoState()
         let insertedIds = insertNodes(topLevel, into: refParent, at: refIndex + 1)
@@ -809,6 +810,7 @@ class OutlineStore {
             selectNodes(insertedIds)
         }
         scheduleSave()
+        return true
     }
 
     @discardableResult
@@ -1114,12 +1116,14 @@ class OutlineStore {
         return newNode.id
     }
 
-    func indent(nodeId: UUID) {
-        guard canIndent(nodeId: nodeId) else { return }
+    @discardableResult
+    func indent(nodeId: UUID) -> Bool {
+        guard canIndent(nodeId: nodeId) else { return false }
         saveUndoState()
-        guard indentNodeWithoutUndo(nodeId: nodeId) else { return }
+        guard indentNodeWithoutUndo(nodeId: nodeId) else { return false }
         pendingFocusId = nodeId
         scheduleSave()
+        return true
     }
 
     private func canIndent(nodeId: UUID) -> Bool {
@@ -1144,12 +1148,14 @@ class OutlineStore {
         return true
     }
 
-    func unindent(nodeId: UUID) {
-        guard canUnindent(nodeId: nodeId) else { return }
+    @discardableResult
+    func unindent(nodeId: UUID) -> Bool {
+        guard canUnindent(nodeId: nodeId) else { return false }
         saveUndoState()
-        guard unindentNodeWithoutUndo(nodeId: nodeId) else { return }
+        guard unindentNodeWithoutUndo(nodeId: nodeId) else { return false }
         pendingFocusId = nodeId
         scheduleSave()
+        return true
     }
 
     private func canUnindent(nodeId: UUID) -> Bool {
@@ -1246,28 +1252,32 @@ class OutlineStore {
         scheduleSave()
     }
 
-    func moveUp(nodeId: UUID) {
+    @discardableResult
+    func moveUp(nodeId: UUID) -> Bool {
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId),
-              index > 0 else { return }
+              index > 0 else { return false }
 
         saveUndoState()
         parent.children.swapAt(index, index - 1)
         pendingFocusId = node.id
         scheduleSave()
+        return true
     }
 
-    func moveDown(nodeId: UUID) {
+    @discardableResult
+    func moveDown(nodeId: UUID) -> Bool {
         guard let node = root.find(id: nodeId),
               let parent = node.parent,
               let index = parent.indexOfChild(nodeId),
-              index < parent.children.count - 1 else { return }
+              index < parent.children.count - 1 else { return false }
 
         saveUndoState()
         parent.children.swapAt(index, index + 1)
         pendingFocusId = node.id
         scheduleSave()
+        return true
     }
 
     func toggleDone(nodeId: UUID) {

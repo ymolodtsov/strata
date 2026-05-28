@@ -353,6 +353,13 @@ struct StrataApp: App {
                     if let window = NSApp.keyWindow,
                        let textView = window.firstResponder as? NSTextView,
                        textView.isFieldEditor {
+                        if let field = StrataTextField.currentEditingField,
+                           field.routeNextUndoToStore {
+                            field.routeNextUndoToStore = false
+                            field.routeNextRedoToStore = true
+                            activeStore?.undo()
+                            return
+                        }
                         textView.undoManager?.undo()
                     } else {
                         activeStore?.undo()
@@ -364,6 +371,13 @@ struct StrataApp: App {
                     if let window = NSApp.keyWindow,
                        let textView = window.firstResponder as? NSTextView,
                        textView.isFieldEditor {
+                        if let field = StrataTextField.currentEditingField,
+                           field.routeNextRedoToStore {
+                            field.routeNextRedoToStore = false
+                            field.routeNextUndoToStore = true
+                            activeStore?.redo()
+                            return
+                        }
                         textView.undoManager?.redo()
                     } else {
                         activeStore?.redo()
@@ -538,7 +552,9 @@ struct StrataApp: App {
             CommandMenu("Outline") {
                 Button("Move Node Up") {
                     if let field = StrataTextField.currentEditingField {
-                        field.onCmdShiftUp?()
+                        if field.onCmdShiftUp?() == true {
+                            field.markStructuralEditForUndo()
+                        }
                     } else {
                         activeStore?.moveSelectedUp()
                     }
@@ -547,7 +563,9 @@ struct StrataApp: App {
 
                 Button("Move Node Down") {
                     if let field = StrataTextField.currentEditingField {
-                        field.onCmdShiftDown?()
+                        if field.onCmdShiftDown?() == true {
+                            field.markStructuralEditForUndo()
+                        }
                     } else {
                         activeStore?.moveSelectedDown()
                     }
@@ -660,10 +678,14 @@ struct StrataApp: App {
         if let textView = activeFieldEditor() {
             let pasteboard = NSPasteboard.general
             if pasteboard.data(forType: OutlineStore.nodePasteboardType) != nil {
-                StrataTextField.currentEditingField?.onPasteNodes?()
+                if StrataTextField.currentEditingField?.onPasteNodes?() == true {
+                    StrataTextField.currentEditingField?.markStructuralEditForUndo()
+                }
             } else if let text = pasteboard.string(forType: .string),
                       text.contains("\n") || text.contains("\r") {
-                StrataTextField.currentEditingField?.onPasteNodes?()
+                if StrataTextField.currentEditingField?.onPasteNodes?() == true {
+                    StrataTextField.currentEditingField?.markStructuralEditForUndo()
+                }
             } else {
                 textView.paste(nil)
             }

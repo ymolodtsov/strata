@@ -10,15 +10,15 @@ struct OutlineTextField: NSViewRepresentable {
     var cursorPosition: Int?
 
     var onCommit: (Int) -> Void
-    var onTab: () -> Void
-    var onBackTab: () -> Void
+    var onTab: () -> Bool
+    var onBackTab: () -> Bool
     var onMoveUp: () -> Void
     var onMoveDown: () -> Void
     var onDelete: () -> Void
     var onMergeWithPrevious: () -> Void
     var onToggleDone: () -> Void
-    var onMoveNodeUp: () -> Void
-    var onMoveNodeDown: () -> Void
+    var onMoveNodeUp: () -> Bool
+    var onMoveNodeDown: () -> Bool
     var onZoomIn: () -> Void
     var onEscape: () -> Void
     var onDidFocus: () -> Void
@@ -27,7 +27,9 @@ struct OutlineTextField: NSViewRepresentable {
     var onBeginEditing: () -> Void
     var onShiftUp: () -> Void
     var onShiftDown: () -> Void
-    var onPasteNodes: () -> Void
+    var onPasteNodes: () -> Bool
+    var onUndo: () -> Void
+    var onRedo: () -> Void
     var searchQuery: String
 
     static let font = NSFont.systemFont(ofSize: 15, weight: .regular)
@@ -77,6 +79,8 @@ struct OutlineTextField: NSViewRepresentable {
         tf.onShiftUp = { context.coordinator.parent.onShiftUp() }
         tf.onShiftDown = { context.coordinator.parent.onShiftDown() }
         tf.onPasteNodes = { context.coordinator.parent.onPasteNodes() }
+        tf.onUndo = { context.coordinator.parent.onUndo() }
+        tf.onRedo = { context.coordinator.parent.onRedo() }
 
         // Set baseline font once — used for layout sizing and placeholder
         tf.font = Self.font
@@ -124,6 +128,8 @@ struct OutlineTextField: NSViewRepresentable {
         nsView.onShiftUp = { onShiftUp() }
         nsView.onShiftDown = { onShiftDown() }
         nsView.onPasteNodes = { onPasteNodes() }
+        nsView.onUndo = { onUndo() }
+        nsView.onRedo = { onRedo() }
 
         applyStyle(nsView)
 
@@ -547,10 +553,14 @@ struct OutlineTextField: NSViewRepresentable {
                 parent.onCommit(offset)
                 return true
             case #selector(NSResponder.insertTab(_:)):
-                parent.onTab()
+                if parent.onTab(), let tf = control as? StrataTextField {
+                    tf.markStructuralEditForUndo()
+                }
                 return true
             case #selector(NSResponder.insertBacktab(_:)):
-                parent.onBackTab()
+                if parent.onBackTab(), let tf = control as? StrataTextField {
+                    tf.markStructuralEditForUndo()
+                }
                 return true
             case #selector(NSResponder.moveUp(_:)):
                 parent.onMoveUp()
@@ -725,6 +735,8 @@ class StrataTextField: NSTextField {
 
     private var lastKnownWidth: CGFloat = 0
     private var programmaticStyleDepth = 0
+    var routeNextUndoToStore = false
+    var routeNextRedoToStore = false
     var isApplyingProgrammaticStyle: Bool { programmaticStyleDepth > 0 }
 
     // Style tracking to avoid redundant restyling in updateNSView
@@ -817,15 +829,17 @@ class StrataTextField: NSTextField {
     }
 
     var onCmdEnter: (() -> Void)?
-    var onCmdShiftUp: (() -> Void)?
-    var onCmdShiftDown: (() -> Void)?
+    var onCmdShiftUp: (() -> Bool)?
+    var onCmdShiftDown: (() -> Bool)?
     var onSelectAllNodes: (() -> Void)?
     var onZoomIn: (() -> Void)?
-    var onTab: (() -> Void)?
-    var onBackTab: (() -> Void)?
+    var onTab: (() -> Bool)?
+    var onBackTab: (() -> Bool)?
     var onShiftUp: (() -> Void)?
     var onShiftDown: (() -> Void)?
-    var onPasteNodes: (() -> Void)?
+    var onPasteNodes: (() -> Bool)?
+    var onUndo: (() -> Void)?
+    var onRedo: (() -> Void)?
 
     func beginProgrammaticStyle() {
         programmaticStyleDepth += 1
@@ -1018,6 +1032,11 @@ class StrataTextField: NSTextField {
         editor.orderFrontLinkPanel(nil)
     }
 
+    func markStructuralEditForUndo() {
+        routeNextUndoToStore = true
+        routeNextRedoToStore = false
+    }
+
     private func toggleFormatting(_ kind: TextFormattingKind) {
         guard let editor = currentEditor() as? NSTextView,
               let storage = editor.textStorage else { return }
@@ -1104,24 +1123,39 @@ class StrataTextField: NSTextField {
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // Cmd+Z / Cmd+Shift+Z — keep text undo inside the field editor
         if event.keyCode == 6 && flags == .command {
+            if routeNextUndoToStore {
+                routeNextUndoToStore = false
+                routeNextRedoToStore = true
+                onUndo?()
+                return true
+            }
             currentEditor()?.undoManager?.undo()
             return true
         }
         if event.keyCode == 6 && flags == [.command, .shift] {
+            if routeNextRedoToStore {
+                routeNextRedoToStore = false
+                routeNextUndoToStore = true
+                onRedo?()
+                return true
+            }
             currentEditor()?.undoManager?.redo()
             return true
         }
 
         // Tab — indent node
         if event.keyCode == 48 && flags.isEmpty {
-            onTab?()
+            if onTab?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Shift+Tab — unindent node
         if event.keyCode == 48 && flags == .shift {
-            onBackTab?()
+            if onBackTab?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Shift+Up — start block selection upward
@@ -1144,6 +1178,7 @@ class StrataTextField: NSTextField {
         }
         // Cmd+Enter — toggle done
         if event.keyCode == 36 && flags == .command {
+            markStructuralEditForUndo()
             onCmdEnter?()
             return true
         }
@@ -1169,22 +1204,30 @@ class StrataTextField: NSTextField {
         }
         // Cmd+Up — move node up (Workflowy-style)
         if event.keyCode == 126 && flags == .command {
-            onCmdShiftUp?()
+            if onCmdShiftUp?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Cmd+Down — move node down (Workflowy-style)
         if event.keyCode == 125 && flags == .command {
-            onCmdShiftDown?()
+            if onCmdShiftDown?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Cmd+Shift+Up — move node up
         if event.keyCode == 126 && flags == [.command, .shift] {
-            onCmdShiftUp?()
+            if onCmdShiftUp?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Cmd+Shift+Down — move node down
         if event.keyCode == 125 && flags == [.command, .shift] {
-            onCmdShiftDown?()
+            if onCmdShiftDown?() == true {
+                markStructuralEditForUndo()
+            }
             return true
         }
         // Cmd+] — zoom in
@@ -1195,12 +1238,16 @@ class StrataTextField: NSTextField {
         // Cmd+V — outline-node or multi-line paste creates nodes; single-line text is normal paste
         if event.keyCode == 9 && flags == .command {
             if NSPasteboard.general.data(forType: OutlineStore.nodePasteboardType) != nil {
-                onPasteNodes?()
+                if onPasteNodes?() == true {
+                    markStructuralEditForUndo()
+                }
                 return true
             }
             if let text = NSPasteboard.general.string(forType: .string),
                text.contains("\n") || text.contains("\r") {
-                onPasteNodes?()
+                if onPasteNodes?() == true {
+                    markStructuralEditForUndo()
+                }
                 return true
             }
             return false
