@@ -53,33 +53,17 @@ enum WindowTabCoordinator {
     }
 
     private static func configureTabbingMode(_ window: NSWindow) {
-        let isCreatingTab = pendingTabCount > 0
-        window.tabbingMode = isCreatingTab ? .preferred : .disallowed
+        window.tabbingIdentifier = NSWindow.TabbingIdentifier("family.ma.strata.document")
+        window.tabbingMode = .preferred
     }
 
     private static func configureChrome(_ window: NSWindow) {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
-        window.toolbarStyle = .unified
-        if window.toolbar == nil || window.toolbar?.identifier != toolbarIdentifier {
-            let toolbar = NSToolbar(identifier: toolbarIdentifier)
-            toolbar.displayMode = .iconOnly
-            toolbar.allowsUserCustomization = false
-            toolbar.delegate = EmptyToolbarDelegate.shared
-            window.toolbar = toolbar
+        window.toolbarStyle = .automatic
+        if window.toolbar?.identifier == toolbarIdentifier {
+            window.toolbar = nil
         }
-    }
-}
-
-private final class EmptyToolbarDelegate: NSObject, NSToolbarDelegate {
-    static let shared = EmptyToolbarDelegate()
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        []
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        []
     }
 }
 
@@ -399,9 +383,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var closeObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Keep tab creation under Strata's Cmd-T/menu flow. AppKit's automatic
-        // tab affordance draws a native plus button that currently renders poorly
-        // in the macOS 26 titlebar; explicit addTabbedWindow calls still work.
+        // Keep tab creation under Strata's Cmd-T/menu flow while leaving each
+        // window in a stable tab-capable mode once AppKit owns the tab group.
         NSWindow.allowsAutomaticWindowTabbing = false
 
         // Save session state when the app loses focus (covers force-quit scenarios)
