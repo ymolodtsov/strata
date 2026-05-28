@@ -3,21 +3,28 @@ import AppKit
 import UniformTypeIdentifiers
 
 private enum OutlineLayoutMetrics {
+    static let outlineCoordinateSpace = "StrataOutlineRows"
     static let indentWidth: CGFloat = 24
     static let controlHeight: CGFloat = 26
-    static let checkboxWidth: CGFloat = 22
-    static let chevronWidth: CGFloat = 16
-    static let bulletWidth: CGFloat = 15
+    static let checkboxWidth: CGFloat = 20
+    static let chevronWidth: CGFloat = 18
+    static let bulletWidth: CGFloat = 18
     static let textGap: CGFloat = 5
     static let checkboxIconSize: CGFloat = 15
     static let chevronIconSize: CGFloat = 10
     static let bulletSize: CGFloat = 6
     static let bulletHoverOutlineSize: CGFloat = 12
+    static let chevronXOffset: CGFloat = 3
     static let controlTopOffset: CGFloat = -2
     static let textTopOffset: CGFloat = 1
+    static let rowVerticalPadding: CGFloat = 2
 
     static func guideX(forDepth depth: Int) -> CGFloat {
         CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + (bulletWidth / 2)
+    }
+
+    static func dotCenterY(in frame: CGRect) -> CGFloat {
+        frame.minY + rowVerticalPadding + (controlHeight / 2) + controlTopOffset
     }
 
     static func textLeading(forDepth depth: Int) -> CGFloat {
@@ -79,7 +86,7 @@ struct NodeRowView: View {
                 }
             }
             .frame(width: OutlineLayoutMetrics.chevronWidth, height: OutlineLayoutMetrics.controlHeight)
-            .offset(y: OutlineLayoutMetrics.controlTopOffset)
+            .offset(x: OutlineLayoutMetrics.chevronXOffset, y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
             .onTapGesture {
                 if !node.children.isEmpty {
@@ -225,12 +232,9 @@ struct NodeRowView: View {
                     .padding(.trailing, 4)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, OutlineLayoutMetrics.rowVerticalPadding)
         .padding(.trailing, 8)
-        .background(alignment: .leading) {
-            HierarchyGuideLines(depth: depth)
-                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
-        }
+        .background(rowFramePreference)
         .background(
             Group {
                 if isSelected {
@@ -328,17 +332,61 @@ struct NodeRowView: View {
     }
 }
 
-private struct HierarchyGuideLines: Shape {
+private struct RowFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private extension NodeRowView {
+    var rowFramePreference: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: RowFramePreferenceKey.self,
+                value: [node.id: proxy.frame(in: .named(OutlineLayoutMetrics.outlineCoordinateSpace))]
+            )
+        }
+    }
+}
+
+private struct VisibleGuideItem: Sendable {
+    let id: UUID
     let depth: Int
+    let isExpanded: Bool
+}
+
+private struct HierarchyGuideOverlay: Shape {
+    let items: [VisibleGuideItem]
+    let rowFrames: [UUID: CGRect]
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        guard depth > 0 else { return path }
+        guard items.count > 1 else { return path }
 
-        for guideDepth in 0..<depth {
-            let x = OutlineLayoutMetrics.guideX(forDepth: guideDepth)
-            path.move(to: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+        for index in items.indices {
+            let item = items[index]
+            guard item.isExpanded,
+                  index + 1 < items.count,
+                  items[index + 1].depth > item.depth,
+                  let parentFrame = rowFrames[item.id] else { continue }
+
+            var lastDescendantIndex = index + 1
+            while lastDescendantIndex + 1 < items.count,
+                  items[lastDescendantIndex + 1].depth > item.depth {
+                lastDescendantIndex += 1
+            }
+
+            guard let lastFrame = rowFrames[items[lastDescendantIndex].id] else { continue }
+
+            let x = OutlineLayoutMetrics.guideX(forDepth: item.depth)
+            let startY = OutlineLayoutMetrics.dotCenterY(in: parentFrame) + (OutlineLayoutMetrics.bulletSize / 2) + 6
+            let endY = lastFrame.maxY - 4
+            guard endY > startY else { continue }
+
+            path.move(to: CGPoint(x: x, y: startY))
+            path.addLine(to: CGPoint(x: x, y: endY))
         }
 
         return path
@@ -440,9 +488,11 @@ struct VisibleItem: Identifiable {
 
 struct FlatOutline: View {
     var store: OutlineStore
+    @State private var rowFrames: [UUID: CGRect] = [:]
 
     var body: some View {
         let items = store.visibleNodes().map { VisibleItem(node: $0.node, depth: $0.depth) }
+        let guideItems = items.map { VisibleGuideItem(id: $0.id, depth: $0.depth, isExpanded: $0.node.isExpanded) }
         let selectedIds = store.selectedNodeIds
         let draggedIds = store.draggedNodeIds
         let selectedCount = selectedIds.count
@@ -454,28 +504,40 @@ struct FlatOutline: View {
         let pendingCursorPosition = store.pendingCursorPosition
         let searchQuery = store.isSearchActive ? store.searchQuery : ""
 
-        ForEach(items) { item in
+        ZStack(alignment: .topLeading) {
+            HierarchyGuideOverlay(items: guideItems, rowFrames: rowFrames)
+                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
+                .allowsHitTesting(false)
+
             VStack(alignment: .leading, spacing: 0) {
-                let isSelected = selectedIds.contains(item.node.id)
-                NodeRowView(
-                    node: item.node,
-                    depth: item.depth,
-                    store: store,
-                    isSelected: isSelected,
-                    isDragging: draggedIds.contains(item.node.id),
-                    isDropTarget: dropTargetId == item.node.id,
-                    dropAbove: dropAbove,
-                    dropAsChild: dropAsChild,
-                    hasSelection: hasSelection,
-                    shouldFocus: pendingFocusId == item.node.id,
-                    cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
-                    searchQuery: searchQuery,
-                    dragCount: isSelected ? max(selectedCount, 1) : 1
-                )
-                if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
-                    NoteEditorView(node: item.node, depth: item.depth, store: store)
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 0) {
+                        let isSelected = selectedIds.contains(item.node.id)
+                        NodeRowView(
+                            node: item.node,
+                            depth: item.depth,
+                            store: store,
+                            isSelected: isSelected,
+                            isDragging: draggedIds.contains(item.node.id),
+                            isDropTarget: dropTargetId == item.node.id,
+                            dropAbove: dropAbove,
+                            dropAsChild: dropAsChild,
+                            hasSelection: hasSelection,
+                            shouldFocus: pendingFocusId == item.node.id,
+                            cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
+                            searchQuery: searchQuery,
+                            dragCount: isSelected ? max(selectedCount, 1) : 1
+                        )
+                        if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
+                            NoteEditorView(node: item.node, depth: item.depth, store: store)
+                        }
+                    }
                 }
             }
+        }
+        .coordinateSpace(name: OutlineLayoutMetrics.outlineCoordinateSpace)
+        .onPreferenceChange(RowFramePreferenceKey.self) { frames in
+            rowFrames = frames
         }
     }
 }
