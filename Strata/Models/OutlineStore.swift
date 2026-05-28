@@ -184,17 +184,19 @@ class OutlineStore {
     }
 
     var breadcrumbs: [(id: UUID, text: String)] {
-        // Walk parent chain from currentRoot up to root for a complete path
+        // Walk parent chain from currentRoot up to the synthetic OPML root.
+        // The root is document metadata rather than a visible outline node, so
+        // breadcrumbs should start at the first real outline item.
         var chain: [OutlineNode] = []
         var node: OutlineNode? = currentRoot
         while let n = node {
-            chain.append(n)
             if n.id == root.id { break }
+            chain.append(n)
             node = n.parent
         }
         chain.reverse()
         return chain.map { n in
-            let label = n.text.isEmpty ? (n.id == root.id ? "Home" : "Untitled") : n.text
+            let label = n.text.isEmpty ? "Untitled" : n.text
             return (id: n.id, text: label)
         }
     }
@@ -1338,6 +1340,7 @@ class OutlineStore {
             return OutlineStore()
         }
         let store = OutlineStore(root: root)
+        store.ensureEditableRoot()
         store.currentFilePath = url
         store.untitledDisplayName = nil
         return store
@@ -1364,6 +1367,7 @@ class OutlineStore {
         save()
 
         root = newRoot
+        ensureEditableRoot()
         currentFilePath = url
         untitledDisplayName = nil
         zoomPath = []
@@ -1375,6 +1379,14 @@ class OutlineStore {
         treeModifiedSinceLastSnapshot = true
         pendingFocusId = root.children.first?.id
         RecentFiles.shared.add(url)
+    }
+
+    private func ensureEditableRoot() {
+        if root.children.isEmpty {
+            let empty = OutlineNode(text: "")
+            empty.parent = root
+            root.children.append(empty)
+        }
     }
 
     func saveFileAs() {

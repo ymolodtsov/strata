@@ -30,6 +30,8 @@ enum OPMLService {
     }
 
     private static func serializeNode(_ node: OutlineNode, indent: Int, into xml: inout String) {
+        guard !isEmptyLeaf(node) else { return }
+
         let pad = String(repeating: "  ", count: indent)
         var attrs = "text=\"\(escapeXML(node.text))\""
 
@@ -58,6 +60,14 @@ enum OPMLService {
             }
             xml += "\(pad)</outline>\n"
         }
+    }
+
+    private static func isEmptyLeaf(_ node: OutlineNode) -> Bool {
+        node.text.isEmpty &&
+        node.note.isEmpty &&
+        node.formatting.isEmpty &&
+        node.children.isEmpty &&
+        !node.isDone
     }
 
     private static func escapeXML(_ string: String) -> String {
