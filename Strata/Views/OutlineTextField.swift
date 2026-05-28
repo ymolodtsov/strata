@@ -1289,8 +1289,8 @@ class StrataTextField: NSTextField {
             wrapItalic()
             return true
         }
-        // Cmd+Shift+H — Highlight
-        if event.keyCode == 4 && flags == [.command, .shift] {
+        // Cmd+L — Highlight
+        if event.keyCode == 37 && flags == .command {
             wrapHighlight()
             return true
         }

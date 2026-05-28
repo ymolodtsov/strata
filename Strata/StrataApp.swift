@@ -881,7 +881,7 @@ struct StrataApp: App {
                 Button("Highlight") {
                     StrataTextField.currentEditingField?.wrapHighlight()
                 }
-                .keyboardShortcut("h", modifiers: [.command, .shift])
+                .keyboardShortcut("l", modifiers: .command)
 
                 Divider()
 
