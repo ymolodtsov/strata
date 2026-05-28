@@ -2,6 +2,18 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private enum OutlineLayoutMetrics {
+    static let indentWidth: CGFloat = 24
+    static let checkboxWidth: CGFloat = 22
+    static let chevronWidth: CGFloat = 16
+    static let bulletWidth: CGFloat = 14
+    static let textGap: CGFloat = 6
+
+    static func guideX(forDepth depth: Int) -> CGFloat {
+        CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + bulletWidth / 2
+    }
+}
+
 struct NodeRowView: View {
     @Bindable var node: OutlineNode
     let depth: Int
@@ -22,16 +34,8 @@ struct NodeRowView: View {
         HStack(alignment: .top, spacing: 0) {
             // Indentation with hierarchy lines
             if depth > 0 {
-                HStack(spacing: 0) {
-                    ForEach(0..<depth, id: \.self) { _ in
-                        ZStack {
-                            Rectangle()
-                                .fill(Color.primary.opacity(0.07))
-                                .frame(width: 1)
-                        }
-                        .frame(width: 24)
-                    }
-                }
+                Spacer()
+                    .frame(width: CGFloat(depth) * OutlineLayoutMetrics.indentWidth)
             }
 
             // Checkbox — visible on hover or when done
@@ -89,7 +93,7 @@ struct NodeRowView: View {
             }
             .help("Focus on this node")
 
-            Spacer().frame(width: 6)
+            Spacer().frame(width: OutlineLayoutMetrics.textGap)
 
             ZStack(alignment: .leading) {
                 OutlineTextField(
@@ -201,6 +205,10 @@ struct NodeRowView: View {
         }
         .padding(.vertical, 2)
         .padding(.trailing, 8)
+        .background(alignment: .leading) {
+            HierarchyGuideLines(depth: depth)
+                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
+        }
         .background(
             Group {
                 if isSelected {
@@ -259,7 +267,7 @@ struct NodeRowView: View {
 
     private var dropIndicatorLeadingPadding: CGFloat {
         let targetDepth = dropAsChild ? depth + 1 : depth
-        return CGFloat(targetDepth) * 24 + 22
+        return CGFloat(targetDepth) * OutlineLayoutMetrics.indentWidth + OutlineLayoutMetrics.checkboxWidth
     }
 
     private var dragPreview: some View {
@@ -295,6 +303,23 @@ struct NodeRowView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.primary.opacity(0.10), lineWidth: 1)
         )
+    }
+}
+
+private struct HierarchyGuideLines: Shape {
+    let depth: Int
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard depth > 0 else { return path }
+
+        for guideDepth in 0..<depth {
+            let x = OutlineLayoutMetrics.guideX(forDepth: guideDepth)
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+        }
+
+        return path
     }
 }
 
@@ -346,7 +371,7 @@ struct NodeDropDelegate: DropDelegate {
     }
 
     private var childDropThreshold: CGFloat {
-        CGFloat(depth) * 24 + 122
+        CGFloat(depth) * OutlineLayoutMetrics.indentWidth + 122
     }
 }
 
@@ -359,7 +384,11 @@ struct NoteEditorView: View {
     @FocusState private var isFocused: Bool
 
     private var leadingPad: CGFloat {
-        CGFloat(depth) * 24 + 22 + 16 + 14 + 6
+        CGFloat(depth) * OutlineLayoutMetrics.indentWidth
+            + OutlineLayoutMetrics.checkboxWidth
+            + OutlineLayoutMetrics.chevronWidth
+            + OutlineLayoutMetrics.bulletWidth
+            + OutlineLayoutMetrics.textGap
     }
 
     var body: some View {
