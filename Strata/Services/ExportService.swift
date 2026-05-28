@@ -109,16 +109,19 @@ enum ExportService {
     }
 
     private static func formattedMarkdown(_ text: String, formatting: [TextFormattingSpan]) -> String {
-        renderFormatted(text, formatting: formatting) { segment, kinds in
+        renderFormatted(text, formatting: formatting) { segment, spans in
             var output = segment
-            for kind in kinds {
-                switch kind {
+            for span in spans {
+                switch span.kind {
                 case .bold:
                     output = "**\(output)**"
                 case .italic:
                     output = "*\(output)*"
                 case .highlight:
                     output = "==\(output)=="
+                case .link:
+                    guard let url = span.url, !url.isEmpty else { break }
+                    output = "[\(output)](\(url))"
                 }
             }
             return output
@@ -126,16 +129,19 @@ enum ExportService {
     }
 
     private static func formattedHTML(_ text: String, formatting: [TextFormattingSpan]) -> String {
-        renderFormatted(text, formatting: formatting) { segment, kinds in
+        renderFormatted(text, formatting: formatting) { segment, spans in
             var output = escapeHTML(segment)
-            for kind in kinds {
-                switch kind {
+            for span in spans {
+                switch span.kind {
                 case .bold:
                     output = "<strong>\(output)</strong>"
                 case .italic:
                     output = "<em>\(output)</em>"
                 case .highlight:
                     output = "<mark>\(output)</mark>"
+                case .link:
+                    guard let url = span.url, !url.isEmpty else { break }
+                    output = "<a href=\"\(escapeHTML(url))\">\(output)</a>"
                 }
             }
             return output
@@ -145,7 +151,7 @@ enum ExportService {
     private static func renderFormatted(
         _ text: String,
         formatting: [TextFormattingSpan],
-        renderSegment: (String, [TextFormattingKind]) -> String
+        renderSegment: (String, [TextFormattingSpan]) -> String
     ) -> String {
         let nsText = text as NSString
         let textLength = nsText.length
@@ -169,13 +175,12 @@ enum ExportService {
             guard end > start else { continue }
 
             let segment = nsText.substring(with: NSRange(location: start, length: end - start))
-            let activeKinds = Set(spans
+            let activeSpans = spans
                 .filter { $0.location <= start && $0.location + $0.length >= end }
-                .map(\.kind))
                 .sorted { lhs, rhs in
-                    formattingSortOrder(lhs) < formattingSortOrder(rhs)
+                    formattingSortOrder(lhs.kind) < formattingSortOrder(rhs.kind)
                 }
-            output += renderSegment(segment, activeKinds)
+            output += renderSegment(segment, activeSpans)
         }
 
         return output
@@ -186,6 +191,7 @@ enum ExportService {
         case .bold: return 0
         case .italic: return 1
         case .highlight: return 2
+        case .link: return 3
         }
     }
 }

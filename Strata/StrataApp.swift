@@ -498,6 +498,13 @@ struct StrataApp: App {
                     StrataTextField.currentEditingField?.wrapHighlight()
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Add Link...") {
+                    StrataTextField.currentEditingField?.editLink()
+                }
+                .keyboardShortcut("k", modifiers: .command)
             }
 
             // MARK: Window — Tab Switching

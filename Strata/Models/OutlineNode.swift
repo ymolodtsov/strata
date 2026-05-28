@@ -4,12 +4,14 @@ enum TextFormattingKind: String, Codable, Hashable {
     case bold
     case italic
     case highlight
+    case link
 }
 
 struct TextFormattingSpan: Codable, Hashable {
     var kind: TextFormattingKind
     var location: Int
     var length: Int
+    var url: String? = nil
 }
 
 extension Array where Element == TextFormattingSpan {
@@ -21,7 +23,7 @@ extension Array where Element == TextFormattingSpan {
             let end = Swift.max(location, Swift.min(span.location + span.length, textLength))
             let length = end - location
             guard length > 0 else { return nil }
-            return TextFormattingSpan(kind: span.kind, location: location, length: length)
+            return TextFormattingSpan(kind: span.kind, location: location, length: length, url: span.url)
         }
         .sorted {
             if $0.location == $1.location {
@@ -54,7 +56,8 @@ extension Array where Element == TextFormattingSpan {
                 after.append(TextFormattingSpan(
                     kind: span.kind,
                     location: start - safeOffset,
-                    length: span.length
+                    length: span.length,
+                    url: span.url
                 ))
             } else {
                 let beforeLength = safeOffset - start
@@ -63,14 +66,16 @@ extension Array where Element == TextFormattingSpan {
                     before.append(TextFormattingSpan(
                         kind: span.kind,
                         location: start,
-                        length: beforeLength
+                        length: beforeLength,
+                        url: span.url
                     ))
                 }
                 if afterLength > 0 {
                     after.append(TextFormattingSpan(
                         kind: span.kind,
                         location: 0,
-                        length: afterLength
+                        length: afterLength,
+                        url: span.url
                     ))
                 }
             }
