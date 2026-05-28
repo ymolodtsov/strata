@@ -1,10 +1,20 @@
 import Foundation
 import AppKit
+import UniformTypeIdentifiers
 
 @Observable
 class OutlineStore {
     static let nodePasteboardType = NSPasteboard.PasteboardType("family.ma.strata.nodes")
     private static let hideCompletedDefaultsKey = "hideCompletedItems"
+    static let opmlContentType = UTType(filenameExtension: "opml")!
+    static let markdownContentType = UTType(filenameExtension: "md")!
+    static let markdownLongContentType = UTType(filenameExtension: "markdown")!
+    static let readableContentTypes: [UTType] = [
+        opmlContentType,
+        markdownContentType,
+        markdownLongContentType,
+        .plainText
+    ]
 
     /// Weak set of all living OutlineStore instances, used to collect open document
     /// paths for session state persistence on quit.
@@ -1411,22 +1421,20 @@ class OutlineStore {
     }
 
     static func load(from url: URL) -> OutlineStore {
-        guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let root = try? OPMLService.parse(data: data) else {
+        guard let loaded = loadDocument(from: url) else {
             return OutlineStore()
         }
-        let store = OutlineStore(root: root)
+        let store = OutlineStore(root: loaded.root)
         store.ensureEditableRoot()
-        store.currentFilePath = url
-        store.untitledDisplayName = nil
+        store.currentFilePath = loaded.savesBackToOriginalURL ? url : nil
+        store.untitledDisplayName = loaded.savesBackToOriginalURL ? nil : loaded.displayName
         return store
     }
 
     /// Open a file into this window, replacing the current content
     func openFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
+        panel.allowedContentTypes = Self.readableContentTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
 
@@ -1437,16 +1445,15 @@ class OutlineStore {
 
     /// Replace the current document content with a file
     func loadFile(from url: URL) {
-        guard let data = try? Data(contentsOf: url),
-              let newRoot = try? OPMLService.parse(data: data) else { return }
+        guard let loaded = Self.loadDocument(from: url) else { return }
 
         // Save current document before switching
         save()
 
-        root = newRoot
+        root = loaded.root
         ensureEditableRoot()
-        currentFilePath = url
-        untitledDisplayName = nil
+        currentFilePath = loaded.savesBackToOriginalURL ? url : nil
+        untitledDisplayName = loaded.savesBackToOriginalURL ? nil : loaded.displayName
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
@@ -1457,6 +1464,127 @@ class OutlineStore {
         treeModifiedSinceLastSnapshot = true
         pendingFocusId = root.children.first?.id
         RecentFiles.shared.add(url)
+    }
+
+    private struct LoadedDocument {
+        let root: OutlineNode
+        let savesBackToOriginalURL: Bool
+        let displayName: String?
+    }
+
+    private static func loadDocument(from url: URL) -> LoadedDocument? {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url) else { return nil }
+
+        let ext = url.pathExtension.lowercased()
+        if ext == "opml" {
+            guard let root = try? OPMLService.parse(data: data) else { return nil }
+            return LoadedDocument(root: root, savesBackToOriginalURL: true, displayName: nil)
+        }
+
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
+            return nil
+        }
+
+        let isMarkdown = ext == "md" || ext == "markdown"
+        let title = url.deletingPathExtension().lastPathComponent
+        let root = parseOutlineText(text, title: title, markdown: isMarkdown)
+        return LoadedDocument(root: root, savesBackToOriginalURL: false, displayName: "\(title).opml")
+    }
+
+    private static func parseOutlineText(_ text: String, title: String, markdown: Bool) -> OutlineNode {
+        var rootTitle = title
+        var entries: [(indent: Int, text: String, isDone: Bool)] = []
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            guard let parsed = parseOutlineTextLine(rawLine, markdown: markdown) else { continue }
+            if markdown && entries.isEmpty && parsed.indent == 0 && parsed.text.hasPrefix("# ") {
+                rootTitle = String(parsed.text.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            entries.append(parsed)
+        }
+
+        let root = OutlineNode(text: rootTitle.isEmpty ? "Imported Outline" : rootTitle)
+        var stack: [(node: OutlineNode, indent: Int)] = [(root, -1)]
+
+        for entry in entries {
+            while let last = stack.last, last.indent >= entry.indent {
+                stack.removeLast()
+            }
+            let parent = stack.last?.node ?? root
+            let node = OutlineNode(text: entry.text, isDone: entry.isDone)
+            node.parent = parent
+            parent.children.append(node)
+            parent.isExpanded = true
+            stack.append((node, entry.indent))
+        }
+
+        return root
+    }
+
+    private static func parseOutlineTextLine(
+        _ rawLine: String,
+        markdown: Bool
+    ) -> (indent: Int, text: String, isDone: Bool)? {
+        guard !rawLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        var tabCount = 0
+        var spaceCount = 0
+        var bodyStart = rawLine.startIndex
+        while bodyStart < rawLine.endIndex {
+            let char = rawLine[bodyStart]
+            if char == "\t" {
+                tabCount += 1
+            } else if char == " " {
+                spaceCount += 1
+            } else {
+                break
+            }
+            bodyStart = rawLine.index(after: bodyStart)
+        }
+
+        let spacesPerIndent = markdown ? 2 : 4
+        let indent = tabCount + (spaceCount / spacesPerIndent)
+        var body = String(rawLine[bodyStart...]).trimmingCharacters(in: .whitespaces)
+        var isDone = false
+
+        if markdown, let stripped = stripMarkdownListMarker(from: body) {
+            body = stripped.text
+            isDone = stripped.isDone
+        } else if let stripped = stripPlainDoneMarker(from: body) {
+            body = stripped.text
+            isDone = stripped.isDone
+        }
+
+        body = body.trimmingCharacters(in: .whitespaces)
+        guard !body.isEmpty else { return nil }
+        return (indent, body, isDone)
+    }
+
+    private static func stripMarkdownListMarker(from text: String) -> (text: String, isDone: Bool)? {
+        guard text.count >= 2,
+              ["-", "*", "+"].contains(String(text.prefix(1))),
+              text.dropFirst().first == " " else { return nil }
+
+        var body = String(text.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        var isDone = false
+        if let stripped = stripPlainDoneMarker(from: body) {
+            body = stripped.text
+            isDone = stripped.isDone
+        }
+        return (body, isDone)
+    }
+
+    private static func stripPlainDoneMarker(from text: String) -> (text: String, isDone: Bool)? {
+        let lower = text.lowercased()
+        if lower.hasPrefix("[x] ") {
+            return (String(text.dropFirst(4)), true)
+        }
+        if lower.hasPrefix("[ ] ") {
+            return (String(text.dropFirst(4)), false)
+        }
+        return nil
     }
 
     private func ensureEditableRoot() {

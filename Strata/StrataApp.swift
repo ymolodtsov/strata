@@ -101,6 +101,8 @@ enum WindowTabCoordinator {
 
 enum SessionState {
     private static let key = "openDocumentPaths"
+    static let openURLsNotification = Notification.Name("StrataOpenURLsNotification")
+
     struct PendingUntitledCopy {
         let root: OutlineNode
         let displayName: String
@@ -121,6 +123,19 @@ enum SessionState {
     /// URLs waiting to be loaded by newly created windows during restoration.
     static var pendingRestoreURLs: [URL] = []
     static var pendingUntitledCopies: [PendingUntitledCopy] = []
+    private static var pendingOpenURLs: [URL] = []
+
+    static func queueOpenURLs(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        pendingOpenURLs.append(contentsOf: urls)
+        NotificationCenter.default.post(name: openURLsNotification, object: nil)
+    }
+
+    static func consumePendingOpenURLs() -> [URL] {
+        let urls = pendingOpenURLs
+        pendingOpenURLs.removeAll()
+        return urls
+    }
 
     static func associate(store: OutlineStore, with window: NSWindow) {
         cleanupWindowStores()
@@ -368,11 +383,20 @@ struct DocumentWindowView: View {
                     store.loadFile(from: url)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: SessionState.openURLsNotification)) { _ in
+                openQueuedURLs()
+            }
     }
 
     /// Restore previously open documents: load saved session state, open additional
     /// tabs for each document beyond the first.
     private func restoreSession() {
+        let queuedURLs = SessionState.consumePendingOpenURLs()
+        if !queuedURLs.isEmpty {
+            openURLs(queuedURLs, preferCurrentWindow: true)
+            return
+        }
+
         let savedURLs = SessionState.loadSavedDocuments()
 
         if !savedURLs.isEmpty {
@@ -401,6 +425,31 @@ struct DocumentWindowView: View {
         } else if let window {
             SessionState.forgetAndSave(window: window)
             window.close()
+        }
+    }
+
+    private func openQueuedURLs() {
+        let urls = SessionState.consumePendingOpenURLs()
+        guard !urls.isEmpty else { return }
+        openURLs(urls, preferCurrentWindow: store.currentFilePath == nil)
+    }
+
+    private func openURLs(_ urls: [URL], preferCurrentWindow: Bool) {
+        guard let first = urls.first else { return }
+        let remaining: ArraySlice<URL>
+
+        if preferCurrentWindow && store.currentFilePath == nil {
+            store.loadFile(from: first)
+            remaining = urls.dropFirst()
+        } else {
+            remaining = urls[...]
+        }
+
+        guard !remaining.isEmpty else { return }
+        SessionState.pendingRestoreURLs.append(contentsOf: remaining)
+        for _ in remaining {
+            WindowTabCoordinator.requestNextWindowAsTab()
+            openWindow(id: "main")
         }
     }
 }
@@ -446,6 +495,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool {
         false
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        SessionState.queueOpenURLs(urls)
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        SessionState.queueOpenURLs([URL(fileURLWithPath: filename)])
+        return true
     }
 
     deinit {
@@ -747,7 +805,7 @@ struct StrataApp: App {
     /// untitled, or in a new tab if the window already has a document.
     private func openFileAsTab() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
+        panel.allowedContentTypes = OutlineStore.readableContentTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
 
