@@ -962,6 +962,7 @@ class OutlineStore {
     var draggedNodeIds: Set<UUID> = []
     var dropTargetId: UUID?
     var dropAbove: Bool = true
+    private var dragCleanupGeneration = 0
 
     func beginDrag(nodeId: UUID) {
         if selectedNodeIds.contains(nodeId) {
@@ -970,11 +971,28 @@ class OutlineStore {
             clearSelection()
             draggedNodeIds = [nodeId]
         }
+        dragCleanupGeneration += 1
+        scheduleDragCleanup(generation: dragCleanupGeneration)
     }
 
     func endDrag() {
+        dragCleanupGeneration += 1
         draggedNodeIds.removeAll()
         dropTargetId = nil
+    }
+
+    private func scheduleDragCleanup(generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self,
+                  generation == self.dragCleanupGeneration,
+                  !self.draggedNodeIds.isEmpty else { return }
+
+            if NSEvent.pressedMouseButtons == 0 {
+                self.endDrag()
+            } else {
+                self.scheduleDragCleanup(generation: generation)
+            }
+        }
     }
 
     func canDrop(on targetId: UUID) -> Bool {
