@@ -13,11 +13,6 @@ enum WindowTabCoordinator {
         pendingTabCount += 1
     }
 
-    static func openNextWindowAsTab(using openWindow: OpenWindowAction) {
-        requestNextWindowAsTab()
-        openWindow(id: "main")
-    }
-
     static func configure(_ window: NSWindow?) {
         guard let window else { return }
         configurePresentation(window)
@@ -30,25 +25,18 @@ enum WindowTabCoordinator {
         let alreadyTabbedWithParent =
             parent.tabGroup?.windows.contains(window) == true ||
             window.tabGroup?.windows.contains(parent) == true
-        guard !alreadyTabbedWithParent else {
-            completePendingTabRequest()
-            return
-        }
+        guard !alreadyTabbedWithParent else { return }
 
         parent.tabbingMode = .preferred
         window.tabbingMode = .preferred
         parent.addTabbedWindow(window, ordered: .above)
-        completePendingTabRequest()
+        pendingTabCount -= 1
+        if pendingTabCount == 0 {
+            requestedParentWindow = nil
+        }
         window.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async {
             configureVisibleWindows()
-        }
-    }
-
-    private static func completePendingTabRequest() {
-        pendingTabCount = max(0, pendingTabCount - 1)
-        if pendingTabCount == 0 {
-            requestedParentWindow = nil
         }
     }
 
@@ -362,7 +350,8 @@ struct DocumentWindowView: View {
             if !remaining.isEmpty {
                 SessionState.pendingRestoreURLs = remaining
                 for _ in remaining {
-                    WindowTabCoordinator.openNextWindowAsTab(using: openWindow)
+                    WindowTabCoordinator.requestNextWindowAsTab()
+                    openWindow(id: "main")
                 }
             }
             return
@@ -738,7 +727,8 @@ struct StrataApp: App {
         }
 
         if let openWindow = openWindowAction {
-            WindowTabCoordinator.openNextWindowAsTab(using: openWindow)
+            WindowTabCoordinator.requestNextWindowAsTab()
+            openWindow(id: "main")
         }
     }
 
@@ -750,7 +740,8 @@ struct StrataApp: App {
         SessionState.pendingUntitledCopies.append(
             SessionState.PendingUntitledCopy(root: duplicate.root, displayName: duplicate.displayName)
         )
-        WindowTabCoordinator.openNextWindowAsTab(using: openWindow)
+        WindowTabCoordinator.requestNextWindowAsTab()
+        openWindow(id: "main")
     }
 
     private func activeFieldEditor() -> NSTextView? {
@@ -835,8 +826,9 @@ struct StrataApp: App {
             store.loadFile(from: url)
         } else if let openWindow = openWindowAction {
             // Current window has a file — open in a new tab
+            WindowTabCoordinator.requestNextWindowAsTab()
             SessionState.pendingRestoreURLs.append(url)
-            WindowTabCoordinator.openNextWindowAsTab(using: openWindow)
+            openWindow(id: "main")
         } else {
             // Fallback: load into current window
             activeStore?.loadFile(from: url)
