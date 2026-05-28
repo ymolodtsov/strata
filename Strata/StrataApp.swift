@@ -471,6 +471,16 @@ struct StrataApp: App {
                 .keyboardShortcut("f", modifiers: .command)
             }
 
+            // MARK: View
+
+            CommandGroup(after: .toolbar) {
+                Toggle("Hide Completed Items", isOn: Binding(
+                    get: { activeStore?.hideCompleted ?? false },
+                    set: { activeStore?.hideCompleted = $0 }
+                ))
+                .disabled(activeStore == nil)
+            }
+
             // MARK: Format
 
             CommandMenu("Format") {
@@ -577,13 +587,6 @@ struct StrataApp: App {
                         store.scheduleSave()
                     }
                 }
-
-                Divider()
-
-                Toggle("Hide Completed", isOn: Binding(
-                    get: { activeStore?.hideCompleted ?? false },
-                    set: { activeStore?.hideCompleted = $0 }
-                ))
             }
         }
     }

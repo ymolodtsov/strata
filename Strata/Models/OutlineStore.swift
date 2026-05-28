@@ -4,6 +4,7 @@ import AppKit
 @Observable
 class OutlineStore {
     static let nodePasteboardType = NSPasteboard.PasteboardType("family.ma.strata.nodes")
+    private static let hideCompletedDefaultsKey = "hideCompletedItems"
 
     /// Weak set of all living OutlineStore instances, used to collect open document
     /// paths for session state persistence on quit.
@@ -921,7 +922,11 @@ class OutlineStore {
 
     // MARK: - Settings
 
-    var hideCompleted = false
+    var hideCompleted = UserDefaults.standard.bool(forKey: OutlineStore.hideCompletedDefaultsKey) {
+        didSet {
+            UserDefaults.standard.set(hideCompleted, forKey: OutlineStore.hideCompletedDefaultsKey)
+        }
+    }
 
     // MARK: - Drag and Drop
 
