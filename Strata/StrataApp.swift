@@ -358,10 +358,7 @@ struct DocumentWindowView: View {
             .onAppear {
                 if Self.isFirstWindow {
                     Self.isFirstWindow = false
-                    // Defer to next run-loop tick so NSDocumentController has loaded its recent list
-                    DispatchQueue.main.async {
-                        restoreSession()
-                    }
+                    restoreSession()
                 } else if let copy = SessionState.pendingUntitledCopies.first {
                     SessionState.pendingUntitledCopies.removeFirst()
                     store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
