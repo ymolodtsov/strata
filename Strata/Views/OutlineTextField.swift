@@ -1230,6 +1230,12 @@ class StrataTextField: NSTextField {
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        // Cmd+W — close the current tab/window while editing text.
+        if event.keyCode == 13 && flags == .command {
+            window?.performClose(nil)
+            return true
+        }
+
         if event.keyCode == 6 && flags == .command {
             if shouldRouteUndoToStore {
                 consumeStructuralUndoRoute()

@@ -159,6 +159,24 @@ class OutlineStore {
         return url.lastPathComponent
     }
 
+    var shouldPromptToSaveBeforeClosing: Bool {
+        currentFilePath == nil && hasMeaningfulContent
+    }
+
+    private var hasMeaningfulContent: Bool {
+        root.children.contains { Self.nodeHasMeaningfulContent($0) }
+    }
+
+    private static func nodeHasMeaningfulContent(_ node: OutlineNode) -> Bool {
+        if !node.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !node.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !node.formatting.isEmpty ||
+            node.isDone {
+            return true
+        }
+        return node.children.contains { nodeHasMeaningfulContent($0) }
+    }
+
     init() {
         root = OutlineNode(text: "Home", children: [
             OutlineNode(text: "")
@@ -1595,7 +1613,8 @@ class OutlineStore {
         }
     }
 
-    func saveFileAs() {
+    @discardableResult
+    func saveFileAs() -> Bool {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
         if let currentURL = currentFilePath {
@@ -1608,7 +1627,9 @@ class OutlineStore {
 
         if panel.runModal() == .OK, let url = panel.url {
             save(to: url)
+            return true
         }
+        return false
     }
 
     func duplicateTemplate() -> (root: OutlineNode, displayName: String) {

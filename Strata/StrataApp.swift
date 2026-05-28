@@ -895,7 +895,6 @@ struct StrataApp: App {
     private func closeCurrentTab() {
         guard let window = NSApp.keyWindow else { return }
         activeStore?.save()
-        SessionState.forget(window: window)
         window.performClose(nil)
 
         DispatchQueue.main.async {

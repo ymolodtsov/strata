@@ -141,6 +141,12 @@ struct ContentView: View {
                 if !store.isSearchActive { store.searchQuery = "" }
                 return nil
             }
+            // Cmd+W — close this tab/window even while a row text editor has focus.
+            if event.keyCode == 13 && flags == .command {
+                store.save()
+                hostingWindow.performClose(nil)
+                return nil
+            }
             // Cmd+Shift+Enter — Toggle note on focused node
             if event.keyCode == 36 && flags == [.command, .shift] {
                 if let focusedId = store.pendingFocusId ?? store.visibleNodes().first?.node.id {
@@ -336,11 +342,16 @@ struct WindowConfigurator: NSViewRepresentable {
     let url: URL?
     var onWindowChange: (NSWindow?) -> Void = { _ in }
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator(store: store)
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(view.window)
             if let window = view.window {
+                configure(window, context: context)
                 SessionState.associate(store: store, with: window)
             }
             onWindowChange(view.window)
@@ -352,6 +363,7 @@ struct WindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(nsView.window)
             if let window = nsView.window {
+                configure(window, context: context)
                 if let url {
                     window.representedURL = url
                     window.representedFilename = url.path
@@ -361,9 +373,73 @@ struct WindowConfigurator: NSViewRepresentable {
                     window.representedFilename = ""
                     window.title = store.documentTitle
                 }
+                window.isDocumentEdited = store.shouldPromptToSaveBeforeClosing
                 SessionState.associate(store: store, with: window)
             }
             onWindowChange(nsView.window)
+        }
+    }
+
+    private func configure(_ window: NSWindow, context: Context) {
+        context.coordinator.store = store
+        if window.delegate !== context.coordinator {
+            window.delegate = context.coordinator
+        }
+        window.isDocumentEdited = store.shouldPromptToSaveBeforeClosing
+    }
+
+    final class Coordinator: NSObject, NSWindowDelegate {
+        var store: OutlineStore
+        private var isShowingClosePrompt = false
+        private var bypassClosePrompt = false
+
+        init(store: OutlineStore) {
+            self.store = store
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            guard !bypassClosePrompt else { return true }
+            guard store.shouldPromptToSaveBeforeClosing else {
+                store.save()
+                return true
+            }
+            guard !isShowingClosePrompt else { return false }
+
+            isShowingClosePrompt = true
+
+            let alert = NSAlert()
+            alert.messageText = "Do you want to save changes to \"\(store.documentTitle)\"?"
+            alert.informativeText = "Your changes will be lost if you don't save them."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Save")
+            alert.addButton(withTitle: "Don't Save")
+            alert.addButton(withTitle: "Cancel")
+
+            alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+                guard let self, let window = sender else { return }
+                self.isShowingClosePrompt = false
+
+                switch response {
+                case .alertFirstButtonReturn:
+                    guard self.store.saveFileAs() else { return }
+                    self.closeWithoutPrompt(window)
+                case .alertSecondButtonReturn:
+                    self.closeWithoutPrompt(window)
+                default:
+                    break
+                }
+            }
+
+            return false
+        }
+
+        private func closeWithoutPrompt(_ window: NSWindow) {
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window else { return }
+                self.bypassClosePrompt = true
+                window.performClose(nil)
+                self.bypassClosePrompt = false
+            }
         }
     }
 }
