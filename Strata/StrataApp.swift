@@ -501,7 +501,7 @@ struct StrataApp: App {
 
                 Divider()
 
-                Button("Add Link...") {
+                Button("Link...") {
                     StrataTextField.currentEditingField?.editLink()
                 }
                 .keyboardShortcut("k", modifiers: .command)

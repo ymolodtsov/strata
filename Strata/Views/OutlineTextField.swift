@@ -701,15 +701,16 @@ struct OutlineTextField: NSViewRepresentable {
                 switch kind {
                 case .highlight:
                     spans.append(TextFormattingSpan(kind: .highlight, location: range.location, length: range.length))
-                case .link:
-                    let storedURL = storage.attribute(OutlineTextField.manualLinkURLAttribute, at: range.location, effectiveRange: nil) as? String
-                    let linkValue = storage.attribute(.link, at: range.location, effectiveRange: nil)
-                    let urlString = storedURL ?? (linkValue as? URL)?.absoluteString ?? (linkValue as? String)
-                    guard let urlString, !urlString.isEmpty else { return }
-                    spans.append(TextFormattingSpan(kind: .link, location: range.location, length: range.length, url: urlString))
-                case .bold, .italic:
+                case .bold, .italic, .link:
                     return
                 }
+            }
+
+            storage.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+                guard range.length > 0 else { return }
+                let urlString = (value as? URL)?.absoluteString ?? (value as? String)
+                guard let urlString, !urlString.isEmpty else { return }
+                spans.append(TextFormattingSpan(kind: .link, location: range.location, length: range.length, url: urlString))
             }
 
             return spans.normalized(forTextLength: fullRange.length)
@@ -973,7 +974,7 @@ class StrataTextField: NSTextField {
         highlightItem.target = self
         menu.addItem(highlightItem)
 
-        let linkItem = NSMenuItem(title: "Add Link...", action: #selector(editLink), keyEquivalent: "k")
+        let linkItem = NSMenuItem(title: "Link...", action: #selector(editLink), keyEquivalent: "k")
         linkItem.keyEquivalentModifierMask = .command
         linkItem.target = self
         menu.addItem(linkItem)
@@ -999,13 +1000,11 @@ class StrataTextField: NSTextField {
               let storage = editor.textStorage else { return }
 
         var range = editor.selectedRange
-        var existingURL = ""
 
         if range.length == 0, storage.length > 0 {
             let location = min(range.location, storage.length - 1)
             var effectiveRange = NSRange(location: 0, length: 0)
-            if let value = storage.attribute(OutlineTextField.formattingAttribute, at: location, effectiveRange: &effectiveRange) as? String,
-               value == TextFormattingKind.link.rawValue {
+            if storage.attribute(.link, at: location, effectiveRange: &effectiveRange) != nil {
                 range = effectiveRange
             }
         }
@@ -1015,56 +1014,8 @@ class StrataTextField: NSTextField {
             return
         }
 
-        if let storedURL = storage.attribute(OutlineTextField.manualLinkURLAttribute, at: range.location, effectiveRange: nil) as? String {
-            existingURL = storedURL
-        } else if let url = storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL {
-            existingURL = url.absoluteString
-        } else if let urlString = storage.attribute(.link, at: range.location, effectiveRange: nil) as? String {
-            existingURL = urlString
-        }
-
-        let alert = NSAlert()
-        alert.messageText = existingURL.isEmpty ? "Add Link" : "Edit Link"
-        alert.informativeText = "Enter a URL for the selected text. Leave it blank to remove the link."
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        input.placeholderString = "https://example.com"
-        input.stringValue = existingURL
-        alert.accessoryView = input
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        let urlString = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let url = urlString.isEmpty ? nil : normalizedURL(from: urlString)
-        if !urlString.isEmpty, url == nil {
-            NSSound.beep()
-            return
-        }
-
-        storage.beginEditing()
-        storage.removeAttribute(.link, range: range)
-        storage.removeAttribute(.underlineStyle, range: range)
-        storage.removeAttribute(OutlineTextField.manualLinkURLAttribute, range: range)
-
-        if urlString.isEmpty {
-            storage.removeAttribute(OutlineTextField.formattingAttribute, range: range)
-            storage.addAttribute(.foregroundColor, value: NSColor.labelColor, range: range)
-        } else if let url {
-            storage.addAttributes([
-                .link: url,
-                .foregroundColor: NSColor.linkColor,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-                OutlineTextField.formattingAttribute: TextFormattingKind.link.rawValue,
-                OutlineTextField.manualLinkURLAttribute: url.absoluteString
-            ], range: range)
-        }
-        storage.endEditing()
-
-        editor.didChangeText()
         editor.setSelectedRange(range)
+        editor.orderFrontLinkPanel(nil)
     }
 
     private func toggleFormatting(_ kind: TextFormattingKind) {
@@ -1126,13 +1077,6 @@ class StrataTextField: NSTextField {
         }
 
         editor.typingAttributes = attributes
-    }
-
-    private func normalizedURL(from rawString: String) -> URL? {
-        if let url = URL(string: rawString), url.scheme != nil {
-            return url
-        }
-        return URL(string: "https://\(rawString)")
     }
 
     private func toggleFontTrait(_ trait: NSFontTraitMask, in range: NSRange, storage: NSTextStorage) {
