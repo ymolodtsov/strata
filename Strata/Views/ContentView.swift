@@ -449,6 +449,22 @@ struct WindowConfigurator: NSViewRepresentable {
                 self.bypassClosePrompt = false
             }
         }
+
+        func windowDidUpdate(_ notification: Notification) {
+            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+        }
+
+        func windowDidBecomeKey(_ notification: Notification) {
+            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+        }
+
+        func windowDidBecomeMain(_ notification: Notification) {
+            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+        }
+
+        func windowDidResize(_ notification: Notification) {
+            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+        }
     }
 }
 
