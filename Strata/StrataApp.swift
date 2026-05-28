@@ -27,9 +27,13 @@ enum WindowTabCoordinator {
             window.tabGroup?.windows.contains(parent) == true
         guard !alreadyTabbedWithParent else { return }
 
+        window.setFrame(parent.frame, display: false)
+        window.alphaValue = 0
+        window.orderOut(nil)
         parent.tabbingMode = .preferred
         window.tabbingMode = .preferred
         parent.addTabbedWindow(window, ordered: .above)
+        window.alphaValue = 1
         pendingTabCount -= 1
         if pendingTabCount == 0 {
             requestedParentWindow = nil
@@ -59,6 +63,9 @@ enum WindowTabCoordinator {
     private static func configureChrome(_ window: NSWindow) {
         window.isRestorable = false
         window.restorationClass = nil
+        if window.styleMask.contains(.fullSizeContentView) {
+            window.styleMask.remove(.fullSizeContentView)
+        }
     }
 }
 
