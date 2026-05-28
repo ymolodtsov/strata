@@ -455,15 +455,15 @@ struct WindowConfigurator: NSViewRepresentable {
         }
 
         func windowDidBecomeKey(_ notification: Notification) {
-            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
         }
 
         func windowDidBecomeMain(_ notification: Notification) {
-            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
         }
 
         func windowDidResize(_ notification: Notification) {
-            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
         }
     }
 }
@@ -473,7 +473,7 @@ final class WindowConfigurationNSView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        onBeforeDraw?(window)
+        WindowTabCoordinator.refreshScrollEdgeEffects(in: window)
     }
 
     override func layout() {
