@@ -16,9 +16,7 @@ enum WindowTabCoordinator {
 
     static func configure(_ window: NSWindow?) {
         guard let window else { return }
-        window.tabbingMode = .preferred
-        configureChrome(window)
-        hideAutomaticTabAddButton(in: window)
+        configurePresentation(window)
 
         guard let parent = requestedParentWindow,
               parent != window,
@@ -30,14 +28,33 @@ enum WindowTabCoordinator {
             window.tabGroup?.windows.contains(parent) == true
         guard !alreadyTabbedWithParent else { return }
 
+        parent.tabbingMode = .preferred
+        window.tabbingMode = .preferred
         parent.addTabbedWindow(window, ordered: .above)
         pendingTabCount -= 1
         if pendingTabCount == 0 {
             requestedParentWindow = nil
         }
         window.makeKeyAndOrderFront(nil)
-        hideAutomaticTabAddButton(in: parent)
-        hideAutomaticTabAddButton(in: window)
+        DispatchQueue.main.async {
+            configureVisibleWindows()
+        }
+    }
+
+    static func configureVisibleWindows() {
+        for window in NSApp.windows where window.isVisible {
+            configurePresentation(window)
+        }
+    }
+
+    private static func configurePresentation(_ window: NSWindow) {
+        configureTabbingMode(window)
+        configureChrome(window)
+    }
+
+    private static func configureTabbingMode(_ window: NSWindow) {
+        let isCreatingTab = pendingTabCount > 0
+        window.tabbingMode = isCreatingTab ? .preferred : .disallowed
     }
 
     private static func configureChrome(_ window: NSWindow) {
@@ -51,77 +68,6 @@ enum WindowTabCoordinator {
             toolbar.delegate = EmptyToolbarDelegate.shared
             window.toolbar = toolbar
         }
-    }
-
-    private static func hideAutomaticTabAddButton(in window: NSWindow) {
-        let delays: [TimeInterval] = [0, 0.05, 0.2, 0.6, 1.0]
-        for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard let frameView = window.contentView?.superview else { return }
-                let standardButtons = Set([
-                    window.standardWindowButton(.closeButton),
-                    window.standardWindowButton(.miniaturizeButton),
-                    window.standardWindowButton(.zoomButton)
-                ].compactMap { $0 })
-
-                for view in frameView.allSubviews {
-                    guard !standardButtons.contains(where: { view === $0 || view.isDescendant(of: $0) }),
-                          view.isAutomaticTabAddControl else { continue }
-                    view.isHidden = true
-                    view.alphaValue = 0
-                }
-            }
-        }
-    }
-}
-
-private extension NSView {
-    var allSubviews: [NSView] {
-        subviews + subviews.flatMap(\.allSubviews)
-    }
-}
-
-private extension NSView {
-    var isAutomaticTabAddControl: Bool {
-        let text = [
-            toolTip,
-            accessibilityLabel(),
-            accessibilityHelp(),
-            accessibilityTitle(),
-            accessibilityValue() as? String,
-            accessibilityIdentifier()
-        ]
-        .compactMap { $0 }
-        .joined(separator: " ")
-        .lowercased()
-
-        if text.contains("new tab") || text.contains("add tab") || text.contains("show tab overview") {
-            return true
-        }
-
-        let buttonLike = accessibilityRole() == .button || String(describing: type(of: self)).lowercased().contains("button")
-        let className = String(describing: type(of: self)).lowercased()
-
-        var imageName = ""
-        if let button = self as? NSButton {
-            imageName = [button.image?.name(), button.alternateImage?.name()]
-                .compactMap { $0 }
-                .joined(separator: " ")
-                .lowercased()
-        }
-
-        let looksLikePlus =
-            text.trimmingCharacters(in: .whitespacesAndNewlines) == "+" ||
-            imageName.contains("plus") ||
-            imageName.contains("add") ||
-            className.contains("add") ||
-            className.contains("plus")
-
-        guard buttonLike || looksLikePlus else { return false }
-        guard frame.width >= 18 && frame.width <= 54 && frame.height >= 18 && frame.height <= 54 else { return false }
-
-        let frameInWindow = convert(bounds, to: nil)
-        return frameInWindow.minY >= 0
     }
 }
 
@@ -472,6 +418,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { notification in
             guard let window = notification.object as? NSWindow else { return }
             SessionState.forgetAndSave(window: window)
+            DispatchQueue.main.async {
+                WindowTabCoordinator.configureVisibleWindows()
+            }
         }
     }
 
@@ -874,6 +823,7 @@ struct StrataApp: App {
 
         DispatchQueue.main.async {
             SessionState.saveOpenDocuments()
+            WindowTabCoordinator.configureVisibleWindows()
         }
     }
 
