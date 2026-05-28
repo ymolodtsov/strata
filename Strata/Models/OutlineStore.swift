@@ -356,6 +356,20 @@ class OutlineStore {
         selectionCursorId = nil
     }
 
+    private func selectNodes(_ nodeIds: [UUID]) {
+        guard !nodeIds.isEmpty else {
+            clearSelection()
+            return
+        }
+
+        selectedNodeIds = Set(nodeIds)
+        selectionAnchorId = nodeIds.first
+        selectionCursorId = nodeIds.last
+        pendingFocusId = nil
+        pendingCursorPosition = nil
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
     /// Enter selection mode with a single node selected (e.g. after pressing Escape)
     func selectNode(_ nodeId: UUID) {
         selectedNodeIds = [nodeId]
@@ -496,6 +510,11 @@ class OutlineStore {
     }
 
     func deleteSelected() {
+        let visibleBefore = visibleNodes()
+        let firstDeletedVisibleIndex = visibleBefore.indices.first {
+            selectedNodeIds.contains(visibleBefore[$0].node.id)
+        }
+
         // Group by parent and sort by descending index to avoid invalidation
         var parentMap: [UUID: [(index: Int, nodeId: UUID)]] = [:]
         for id in selectedNodeIds {
@@ -529,11 +548,19 @@ class OutlineStore {
             empty.parent = cr
             cr.children.append(empty)
             pendingFocusId = empty.id
+            clearSelection()
+        } else if let firstDeletedVisibleIndex {
+            let visibleAfter = visibleNodes()
+            if visibleAfter.isEmpty {
+                clearSelection()
+            } else {
+                let nextIndex = min(firstDeletedVisibleIndex, visibleAfter.count - 1)
+                selectNodes([visibleAfter[nextIndex].node.id])
+            }
         } else {
-            pendingFocusId = cr.children.first?.id
+            clearSelection()
         }
 
-        clearSelection()
         scheduleSave()
     }
 
@@ -546,7 +573,6 @@ class OutlineStore {
         for node in selected {
             node.setDone(anyUndone)
         }
-        clearSelection()
         scheduleSave()
     }
 
@@ -596,6 +622,64 @@ class OutlineStore {
 
         if changed {
             scheduleSave()
+        }
+    }
+
+    func mergeSelected() {
+        let visibleOrder = Dictionary(uniqueKeysWithValues: visibleNodes().enumerated().map { index, item in
+            (item.node.id, index)
+        })
+        let blocks = selectedSiblingBlocks()
+            .filter { $0.nodes.count > 1 }
+            .sorted {
+                (visibleOrder[$0.nodes[0].id] ?? Int.max) < (visibleOrder[$1.nodes[0].id] ?? Int.max)
+            }
+        guard !blocks.isEmpty else { return }
+
+        saveUndoState()
+
+        var survivors: [UUID] = []
+        for block in blocks {
+            let target = block.nodes[0]
+            for node in block.nodes.dropFirst() {
+                mergeNode(node, into: target)
+                if let parent = node.parent, let index = parent.indexOfChild(node.id) {
+                    parent.children.remove(at: index)
+                }
+            }
+            survivors.append(target.id)
+        }
+
+        pruneZoomPath()
+        selectNodes(survivors)
+        scheduleSave()
+    }
+
+    private func mergeNode(_ node: OutlineNode, into target: OutlineNode) {
+        let mergePoint = (target.text as NSString).length
+        let nodeLength = (node.text as NSString).length
+
+        target.text += node.text
+        target.formatting = (
+            target.formatting.normalized(forTextLength: mergePoint)
+            + node.formatting.offset(by: mergePoint, textLength: mergePoint + nodeLength)
+        )
+        .normalized(forTextLength: (target.text as NSString).length)
+
+        if !node.note.isEmpty {
+            if target.note.isEmpty {
+                target.note = node.note
+            } else {
+                target.note += "\n\(node.note)"
+            }
+        }
+
+        for child in node.children {
+            child.parent = target
+            target.children.append(child)
+        }
+        if !node.children.isEmpty {
+            target.isExpanded = true
         }
     }
 
@@ -687,8 +771,8 @@ class OutlineStore {
         deleteSelected() // already saves undo state
     }
 
-    func pasteNodes(after nodeId: UUID) {
-        if pasteOutlineNodes(after: nodeId) {
+    func pasteNodes(after nodeId: UUID, selectInserted: Bool = false) {
+        if pasteOutlineNodes(after: nodeId, selectInserted: selectInserted) {
             return
         }
 
@@ -702,12 +786,15 @@ class OutlineStore {
         guard !topLevel.isEmpty else { return }
 
         saveUndoState()
-        insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        let insertedIds = insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        if selectInserted {
+            selectNodes(insertedIds)
+        }
         scheduleSave()
     }
 
     @discardableResult
-    private func pasteOutlineNodes(after nodeId: UUID) -> Bool {
+    private func pasteOutlineNodes(after nodeId: UUID, selectInserted: Bool) -> Bool {
         guard let refNode = root.find(id: nodeId),
               let refParent = refNode.parent,
               let refIndex = refParent.indexOfChild(nodeId),
@@ -718,7 +805,10 @@ class OutlineStore {
         guard !topLevel.isEmpty else { return false }
 
         saveUndoState()
-        insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        let insertedIds = insertNodes(topLevel, into: refParent, at: refIndex + 1)
+        if selectInserted {
+            selectNodes(insertedIds)
+        }
         scheduleSave()
         return true
     }
@@ -765,24 +855,27 @@ class OutlineStore {
         return topLevel
     }
 
-    private func insertNodes(_ topLevel: [OutlineNode], into parent: OutlineNode, at index: Int) {
+    @discardableResult
+    private func insertNodes(_ topLevel: [OutlineNode], into parent: OutlineNode, at index: Int) -> [UUID] {
+        var insertedIds: [UUID] = []
         for (offset, node) in topLevel.enumerated() {
             node.parent = parent
             parent.children.insert(node, at: min(index + offset, parent.children.count))
+            insertedIds.append(node.id)
         }
         if let last = topLevel.last {
             pendingFocusId = last.id
         }
+        return insertedIds
     }
 
     func pasteAfterSelection() {
         let visible = visibleNodes()
         if let lastIdx = visible.indices.last(where: { selectedNodeIds.contains(visible[$0].node.id) }) {
             let afterId = visible[lastIdx].node.id
-            clearSelection()
-            pasteNodes(after: afterId)
+            pasteNodes(after: afterId, selectInserted: true)
         } else if let last = visible.last {
-            pasteNodes(after: last.node.id)
+            pasteNodes(after: last.node.id, selectInserted: true)
         }
     }
 
@@ -901,7 +994,7 @@ class OutlineStore {
         }
 
         endDrag()
-        clearSelection()
+        selectNodes(topLevel.map(\.id))
         scheduleSave()
         return true
     }
@@ -953,7 +1046,14 @@ class OutlineStore {
         )
         .normalized(forTextLength: (prevNode.text as NSString).length)
 
-        // Transfer children to the previous node
+        // Transfer note and children to the previous node
+        if !node.note.isEmpty {
+            if prevNode.note.isEmpty {
+                prevNode.note = node.note
+            } else {
+                prevNode.note += "\n\(node.note)"
+            }
+        }
         for child in node.children {
             child.parent = prevNode
             prevNode.children.append(child)
@@ -1079,7 +1179,6 @@ class OutlineStore {
             changed = indentNodeWithoutUndo(nodeId: id) || changed
         }
         if changed {
-            clearSelection()
             scheduleSave()
         }
     }
@@ -1098,7 +1197,6 @@ class OutlineStore {
             changed = unindentNodeWithoutUndo(nodeId: id) || changed
         }
         if changed {
-            clearSelection()
             scheduleSave()
         }
     }

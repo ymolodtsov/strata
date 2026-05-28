@@ -205,6 +205,11 @@ struct ContentView: View {
                 store.toggleDoneSelected()
                 return nil
             }
+            // Cmd+J — merge selected sibling nodes
+            if event.keyCode == 38 && flags == .command {
+                store.mergeSelected()
+                return nil
+            }
             // Cmd+C — copy selected as text
             if event.keyCode == 8 && flags == .command {
                 store.copySelectedAsText()

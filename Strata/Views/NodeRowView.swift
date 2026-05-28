@@ -83,82 +83,93 @@ struct NodeRowView: View {
 
             Spacer().frame(width: 6)
 
-            OutlineTextField(
-                nodeId: node.id,
-                text: Binding(
-                    get: { node.text },
-                    set: { node.text = $0 }
-                ),
-                formatting: Binding(
-                    get: { node.formatting },
-                    set: { node.formatting = $0 }
-                ),
-                isDone: node.isDone,
-                shouldFocus: store.pendingFocusId == node.id,
-                cursorPosition: store.pendingFocusId == node.id ? store.pendingCursorPosition : nil,
-                onCommit: { cursorOffset in
-                    store.splitAndInsert(after: node.id, cursorOffset: cursorOffset)
-                },
-                onTab: { store.indent(nodeId: node.id) },
-                onBackTab: { store.unindent(nodeId: node.id) },
-                onMoveUp: {
-                    if let prevId = store.previousVisibleNode(before: node.id) {
-                        store.pendingFocusId = prevId
-                    }
-                },
-                onMoveDown: {
-                    if let nextId = store.nextVisibleNode(after: node.id) {
-                        store.pendingFocusId = nextId
-                    }
-                },
-                onDelete: { store.deleteNode(nodeId: node.id) },
-                onMergeWithPrevious: { store.mergeWithPrevious(nodeId: node.id) },
-                onToggleDone: { store.toggleDone(nodeId: node.id) },
-                onMoveNodeUp: { store.moveUp(nodeId: node.id) },
-                onMoveNodeDown: { store.moveDown(nodeId: node.id) },
-                onZoomIn: { store.zoomIn(nodeId: node.id) },
-                onEscape: {
-                    if store.hasSelection {
+            ZStack(alignment: .leading) {
+                OutlineTextField(
+                    nodeId: node.id,
+                    text: Binding(
+                        get: { node.text },
+                        set: { node.text = $0 }
+                    ),
+                    formatting: Binding(
+                        get: { node.formatting },
+                        set: { node.formatting = $0 }
+                    ),
+                    isDone: node.isDone,
+                    shouldFocus: store.pendingFocusId == node.id,
+                    cursorPosition: store.pendingFocusId == node.id ? store.pendingCursorPosition : nil,
+                    onCommit: { cursorOffset in
+                        store.splitAndInsert(after: node.id, cursorOffset: cursorOffset)
+                    },
+                    onTab: { store.indent(nodeId: node.id) },
+                    onBackTab: { store.unindent(nodeId: node.id) },
+                    onMoveUp: {
+                        if let prevId = store.previousVisibleNode(before: node.id) {
+                            store.pendingFocusId = prevId
+                        }
+                    },
+                    onMoveDown: {
+                        if let nextId = store.nextVisibleNode(after: node.id) {
+                            store.pendingFocusId = nextId
+                        }
+                    },
+                    onDelete: { store.deleteNode(nodeId: node.id) },
+                    onMergeWithPrevious: { store.mergeWithPrevious(nodeId: node.id) },
+                    onToggleDone: { store.toggleDone(nodeId: node.id) },
+                    onMoveNodeUp: { store.moveUp(nodeId: node.id) },
+                    onMoveNodeDown: { store.moveDown(nodeId: node.id) },
+                    onZoomIn: { store.zoomIn(nodeId: node.id) },
+                    onEscape: {
+                        if store.hasSelection {
+                            store.clearSelection()
+                        } else if store.isSearchActive {
+                            store.isSearchActive = false
+                            store.searchQuery = ""
+                        } else {
+                            // Exit editing → enter selection mode with this node selected.
+                            // User can then navigate with Up/Down, extend with Shift+Up/Down,
+                            // press Enter to edit, or Escape again to fully deselect.
+                            store.selectNode(node.id)
+                        }
+                    },
+                    onDidFocus: {
+                        if store.pendingFocusId == node.id {
+                            store.pendingFocusId = nil
+                            store.pendingCursorPosition = nil
+                        }
+                    },
+                    onTextChange: { store.scheduleSave() },
+                    onSelectAllNodes: { store.selectAllVisible() },
+                    onBeginEditing: {
                         store.clearSelection()
-                    } else if store.isSearchActive {
-                        store.isSearchActive = false
-                        store.searchQuery = ""
-                    } else {
-                        // Exit editing → enter selection mode with this node selected.
-                        // User can then navigate with Up/Down, extend with Shift+Up/Down,
-                        // press Enter to edit, or Escape again to fully deselect.
-                        store.selectNode(node.id)
-                    }
-                },
-                onDidFocus: {
-                    if store.pendingFocusId == node.id {
-                        store.pendingFocusId = nil
-                        store.pendingCursorPosition = nil
-                    }
-                },
-                onTextChange: { store.scheduleSave() },
-                onSelectAllNodes: { store.selectAllVisible() },
-                onBeginEditing: {
-                    store.clearSelection()
-                    store.saveUndoStateIfModified()
-                },
-                onShiftUp: {
-                    if store.hasSelection {
-                        store.extendSelectionUp()
-                    } else {
-                        store.startSelectionUp(from: node.id)
-                    }
-                },
-                onShiftDown: {
-                    if store.hasSelection {
-                        store.extendSelectionDown()
-                    } else {
-                        store.startSelectionDown(from: node.id)
-                    }
-                },
-                onPasteNodes: { store.pasteNodes(after: node.id) },
-                searchQuery: store.isSearchActive ? store.searchQuery : ""
-            )
+                        store.saveUndoStateIfModified()
+                    },
+                    onShiftUp: {
+                        if store.hasSelection {
+                            store.extendSelectionUp()
+                        } else {
+                            store.startSelectionUp(from: node.id)
+                        }
+                    },
+                    onShiftDown: {
+                        if store.hasSelection {
+                            store.extendSelectionDown()
+                        } else {
+                            store.startSelectionDown(from: node.id)
+                        }
+                    },
+                    onPasteNodes: { store.pasteNodes(after: node.id) },
+                    searchQuery: store.isSearchActive ? store.searchQuery : ""
+                )
+                .allowsHitTesting(!store.hasSelection)
+
+                if store.hasSelection {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            handleTextAreaClick()
+                        }
+                }
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // Note indicator
@@ -206,6 +217,15 @@ struct NodeRowView: View {
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard flags.contains(.shift) || flags.contains(.command) else { return }
         store.handleNodeClick(node.id, modifiers: flags)
+    }
+
+    private func handleTextAreaClick() {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.shift) || flags.contains(.command) {
+            store.handleNodeClick(node.id, modifiers: flags)
+        } else {
+            store.selectNode(node.id)
+        }
     }
 
     private func dragProvider() -> NSItemProvider {

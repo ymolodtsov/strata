@@ -363,6 +363,30 @@ struct StrataApp: App {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
             }
 
+            CommandGroup(replacing: .pasteboard) {
+                Button("Cut") {
+                    performCut()
+                }
+                .keyboardShortcut("x", modifiers: .command)
+
+                Button("Copy") {
+                    performCopy()
+                }
+                .keyboardShortcut("c", modifiers: .command)
+
+                Button("Paste") {
+                    performPaste()
+                }
+                .keyboardShortcut("v", modifiers: .command)
+
+                Divider()
+
+                Button("Select All") {
+                    performSelectAll()
+                }
+                .keyboardShortcut("a", modifiers: .command)
+            }
+
             // MARK: File — Open / Recent
 
             CommandGroup(replacing: .newItem) {
@@ -504,6 +528,11 @@ struct StrataApp: App {
                 }
                 .keyboardShortcut(.downArrow, modifiers: .command)
 
+                Button("Merge Selected Nodes") {
+                    activeStore?.mergeSelected()
+                }
+                .keyboardShortcut("j", modifiers: .command)
+
                 Divider()
 
                 Button("Zoom In") {
@@ -576,6 +605,58 @@ struct StrataApp: App {
     private func duplicateActiveDocument() {
         guard let duplicateURL = activeStore?.duplicate() else { return }
         openURLAsTab(duplicateURL)
+    }
+
+    private func activeFieldEditor() -> NSTextView? {
+        guard let window = NSApp.keyWindow,
+              let textView = window.firstResponder as? NSTextView,
+              textView.isFieldEditor else { return nil }
+        return textView
+    }
+
+    private func performCut() {
+        if let textView = activeFieldEditor() {
+            textView.cut(nil)
+        } else {
+            activeStore?.cutSelected()
+        }
+    }
+
+    private func performCopy() {
+        if let textView = activeFieldEditor() {
+            textView.copy(nil)
+        } else {
+            activeStore?.copySelectedAsText()
+        }
+    }
+
+    private func performPaste() {
+        if let textView = activeFieldEditor() {
+            let pasteboard = NSPasteboard.general
+            if pasteboard.data(forType: OutlineStore.nodePasteboardType) != nil {
+                StrataTextField.currentEditingField?.onPasteNodes?()
+            } else if let text = pasteboard.string(forType: .string),
+                      text.contains("\n") || text.contains("\r") {
+                StrataTextField.currentEditingField?.onPasteNodes?()
+            } else {
+                textView.paste(nil)
+            }
+        } else {
+            activeStore?.pasteAfterSelection()
+        }
+    }
+
+    private func performSelectAll() {
+        if let textView = activeFieldEditor() {
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            if textView.selectedRange == fullRange {
+                StrataTextField.currentEditingField?.onSelectAllNodes?()
+            } else {
+                textView.selectAll(nil)
+            }
+        } else {
+            activeStore?.selectAllVisible()
+        }
     }
 
     private func closeCurrentTab() {
