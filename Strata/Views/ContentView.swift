@@ -280,15 +280,30 @@ private struct ScrollEdgeSuppressor: NSViewRepresentable {
     }
 }
 
+private final class WeakScrollEdgeTarget {
+    weak var view: NSView?
+
+    init(_ view: NSView) {
+        self.view = view
+    }
+}
+
 private final class ScrollEdgeSuppressorNSView: NSView {
+    private weak var cachedScrollView: NSScrollView?
+    private var cachedTargets: [WeakScrollEdgeTarget] = []
+    private var lastTargetRefreshTime: TimeInterval = 0
+    private let targetRefreshInterval: TimeInterval = 0.5
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        suppressOwningScrollView()
+        invalidateSuppressionCache()
+        suppressOwningScrollView(forceRefresh: true)
     }
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
-        suppressOwningScrollView()
+        invalidateSuppressionCache()
+        suppressOwningScrollView(forceRefresh: true)
     }
 
     override func layout() {
@@ -301,15 +316,27 @@ private final class ScrollEdgeSuppressorNSView: NSView {
         super.viewWillDraw()
     }
 
-    func suppressOwningScrollView() {
-        guard let scrollView = nearestScrollView() else { return }
+    func suppressOwningScrollView(forceRefresh: Bool = false) {
+        guard let scrollView = cachedScrollView ?? nearestScrollView() else { return }
+        cachedScrollView = scrollView
 
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.scrollerInsets = NSEdgeInsetsZero
         scrollView.contentView.automaticallyAdjustsContentInsets = false
         scrollView.contentView.contentInsets = NSEdgeInsetsZero
-        suppressScrollEdgePocket(in: scrollView, insidePocket: false)
+
+        let now = ProcessInfo.processInfo.systemUptime
+        if forceRefresh || cachedTargets.isEmpty || now - lastTargetRefreshTime > targetRefreshInterval {
+            refreshTargets(in: scrollView, now: now)
+        }
+        hideCachedTargets()
+    }
+
+    private func invalidateSuppressionCache() {
+        cachedScrollView = nil
+        cachedTargets.removeAll()
+        lastTargetRefreshTime = 0
     }
 
     private func nearestScrollView() -> NSScrollView? {
@@ -323,7 +350,23 @@ private final class ScrollEdgeSuppressorNSView: NSView {
         return nil
     }
 
-    private func suppressScrollEdgePocket(in view: NSView, insidePocket: Bool) {
+    private func refreshTargets(in scrollView: NSScrollView, now: TimeInterval) {
+        var targets: [NSView] = []
+        collectScrollEdgeTargets(in: scrollView, insidePocket: false, targets: &targets)
+        cachedTargets = targets.map(WeakScrollEdgeTarget.init)
+        lastTargetRefreshTime = now
+    }
+
+    private func hideCachedTargets() {
+        cachedTargets = cachedTargets.filter { target in
+            guard let view = target.view else { return false }
+            view.isHidden = true
+            view.alphaValue = 0
+            return true
+        }
+    }
+
+    private func collectScrollEdgeTargets(in view: NSView, insidePocket: Bool, targets: inout [NSView]) {
         let className = NSStringFromClass(type(of: view))
         let isPocket = insidePocket || className.contains("NSScrollPocket")
         let isTopBackdrop = className.contains("BackdropView") &&
@@ -331,12 +374,11 @@ private final class ScrollEdgeSuppressorNSView: NSView {
             view.frame.height <= 80
 
         if isPocket || isTopBackdrop {
-            view.isHidden = true
-            view.alphaValue = 0
+            targets.append(view)
         }
 
         for subview in view.subviews {
-            suppressScrollEdgePocket(in: subview, insidePocket: isPocket)
+            collectScrollEdgeTargets(in: subview, insidePocket: isPocket, targets: &targets)
         }
     }
 }

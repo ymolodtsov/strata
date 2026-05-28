@@ -19,6 +19,7 @@ enum WindowTabCoordinator {
 
     private static weak var requestedParentWindow: NSWindow?
     private static var pendingTabCount = 0
+    private static var configuredChromeWindowIds = Set<ObjectIdentifier>()
     private static var suppressionStates: [ObjectIdentifier: SuppressionState] = [:]
 
     static func requestNextWindowAsTab() {
@@ -92,6 +93,12 @@ enum WindowTabCoordinator {
         applyScrollEdgeSuppression(in: window, refreshTargets: true)
     }
 
+    static func forget(window: NSWindow) {
+        let windowId = ObjectIdentifier(window)
+        configuredChromeWindowIds.remove(windowId)
+        suppressionStates.removeValue(forKey: windowId)
+    }
+
     private static func configurePresentation(_ window: NSWindow) {
         configureTabbingMode(window)
         configureTabBarVisibility(window)
@@ -126,7 +133,13 @@ enum WindowTabCoordinator {
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
-        scheduleScrollEdgeSuppression(in: window)
+
+        let windowId = ObjectIdentifier(window)
+        if configuredChromeWindowIds.insert(windowId).inserted {
+            scheduleScrollEdgeSuppression(in: window)
+        } else {
+            applyScrollEdgeSuppression(in: window, refreshTargets: false)
+        }
     }
 
     private static func configureScrollViews(in window: NSWindow) {
@@ -663,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil, queue: .main
         ) { notification in
             guard let window = notification.object as? NSWindow else { return }
+            WindowTabCoordinator.forget(window: window)
             SessionState.forgetAndSave(window: window)
             DispatchQueue.main.async {
                 WindowTabCoordinator.configureVisibleWindows()
