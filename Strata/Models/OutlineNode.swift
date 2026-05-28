@@ -35,7 +35,7 @@ extension Array where Element == TextFormattingSpan {
 
     func offset(by offset: Int, textLength: Int) -> [TextFormattingSpan] {
         map {
-            TextFormattingSpan(kind: $0.kind, location: $0.location + offset, length: $0.length)
+            TextFormattingSpan(kind: $0.kind, location: $0.location + offset, length: $0.length, url: $0.url)
         }
         .normalized(forTextLength: textLength)
     }

@@ -6,11 +6,16 @@ struct NodeRowView: View {
     @Bindable var node: OutlineNode
     let depth: Int
     var store: OutlineStore
+    let isSelected: Bool
+    let isDragging: Bool
+    let isDropTarget: Bool
+    let dropAbove: Bool
+    let hasSelection: Bool
+    let shouldFocus: Bool
+    let cursorPosition: Int?
+    let searchQuery: String
+    let dragCount: Int
     @State private var isHovered = false
-
-    private var isSelected: Bool {
-        store.selectedNodeIds.contains(node.id)
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -97,8 +102,8 @@ struct NodeRowView: View {
                         set: { node.formatting = $0 }
                     ),
                     isDone: node.isDone,
-                    shouldFocus: store.pendingFocusId == node.id,
-                    cursorPosition: store.pendingFocusId == node.id ? store.pendingCursorPosition : nil,
+                    shouldFocus: shouldFocus,
+                    cursorPosition: cursorPosition,
                     onCommit: { cursorOffset in
                         store.splitAndInsert(after: node.id, cursorOffset: cursorOffset)
                     },
@@ -121,7 +126,7 @@ struct NodeRowView: View {
                     onMoveNodeDown: { store.moveDown(nodeId: node.id) },
                     onZoomIn: { store.zoomIn(nodeId: node.id) },
                     onEscape: {
-                        if store.hasSelection {
+                        if hasSelection {
                             store.clearSelection()
                         } else if store.isSearchActive {
                             store.isSearchActive = false
@@ -162,11 +167,11 @@ struct NodeRowView: View {
                     onPasteNodes: { store.pasteNodes(after: node.id) },
                     onUndo: { store.undo() },
                     onRedo: { store.redo() },
-                    searchQuery: store.isSearchActive ? store.searchQuery : ""
+                    searchQuery: searchQuery
                 )
-                .allowsHitTesting(!store.hasSelection)
+                .allowsHitTesting(!hasSelection)
 
-                if store.hasSelection {
+                if hasSelection {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -199,9 +204,9 @@ struct NodeRowView: View {
                 }
             }
         )
-        .opacity(store.draggedNodeIds.contains(node.id) ? 0.12 : 1.0)
-        .overlay(alignment: store.dropAbove ? .top : .bottom) {
-            if store.dropTargetId == node.id && !store.draggedNodeIds.contains(node.id) {
+        .opacity(isDragging ? 0.12 : 1.0)
+        .overlay(alignment: dropAbove ? .top : .bottom) {
+            if isDropTarget && !isDragging {
                 Rectangle()
                     .fill(Color.accentColor)
                     .frame(height: 2)
@@ -241,24 +246,22 @@ struct NodeRowView: View {
 
     private func dragProvider() -> NSItemProvider {
         store.beginDrag(nodeId: node.id)
-        let count = max(store.draggedNodeIds.count, 1)
-        let label = count == 1 ? node.text : "\(count) Strata nodes"
+        let label = dragCount == 1 ? node.text : "\(dragCount) Strata nodes"
         return NSItemProvider(object: NSString(string: label))
     }
 
     private var dragPreview: some View {
-        let count = max(store.draggedNodeIds.count, 1)
         let title = node.text.isEmpty ? "Untitled" : node.text
 
         return HStack(spacing: 10) {
-            Image(systemName: count == 1 ? "circle.fill" : "line.3.horizontal")
+            Image(systemName: dragCount == 1 ? "circle.fill" : "line.3.horizontal")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 18, height: 18)
 
             VStack(alignment: .leading, spacing: 2) {
-                if count > 1 {
-                    Text("\(count) nodes")
+                if dragCount > 1 {
+                    Text("\(dragCount) nodes")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -304,16 +307,14 @@ struct NodeDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard store.canDrop(on: nodeId) else { return }
-        store.dropTargetId = nodeId
-        store.dropAbove = info.location.y < 13
+        store.updateDropTarget(nodeId, above: info.location.y < 13)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         guard store.canDrop(on: nodeId) else {
             return DropProposal(operation: .cancel)
         }
-        store.dropTargetId = nodeId
-        store.dropAbove = info.location.y < 13
+        store.updateDropTarget(nodeId, above: info.location.y < 13)
         return DropProposal(operation: .move)
     }
 
@@ -322,9 +323,7 @@ struct NodeDropDelegate: DropDelegate {
     }
 
     func dropExited(info: DropInfo) {
-        if store.dropTargetId == nodeId {
-            store.dropTargetId = nil
-        }
+        store.clearDropTarget(nodeId)
     }
 }
 
@@ -374,9 +373,33 @@ struct FlatOutline: View {
 
     var body: some View {
         let items = store.visibleNodes().map { VisibleItem(node: $0.node, depth: $0.depth) }
+        let selectedIds = store.selectedNodeIds
+        let draggedIds = store.draggedNodeIds
+        let selectedCount = selectedIds.count
+        let dropTargetId = store.dropTargetId
+        let dropAbove = store.dropAbove
+        let hasSelection = !selectedIds.isEmpty
+        let pendingFocusId = store.pendingFocusId
+        let pendingCursorPosition = store.pendingCursorPosition
+        let searchQuery = store.isSearchActive ? store.searchQuery : ""
+
         ForEach(items) { item in
             VStack(alignment: .leading, spacing: 0) {
-                NodeRowView(node: item.node, depth: item.depth, store: store)
+                let isSelected = selectedIds.contains(item.node.id)
+                NodeRowView(
+                    node: item.node,
+                    depth: item.depth,
+                    store: store,
+                    isSelected: isSelected,
+                    isDragging: draggedIds.contains(item.node.id),
+                    isDropTarget: dropTargetId == item.node.id,
+                    dropAbove: dropAbove,
+                    hasSelection: hasSelection,
+                    shouldFocus: pendingFocusId == item.node.id,
+                    cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
+                    searchQuery: searchQuery,
+                    dragCount: isSelected ? max(selectedCount, 1) : 1
+                )
                 if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
                     NoteEditorView(node: item.node, depth: item.depth, store: store)
                 }

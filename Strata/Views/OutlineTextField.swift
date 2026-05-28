@@ -213,6 +213,7 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledFormatting = currentFormatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
+            tf.invalidateMeasurementCache()
             tf.invalidateIntrinsicContentSize()
         } else {
             // Not editing — build styled attributed string directly
@@ -253,6 +254,7 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
             if shouldInvalidateSize {
+                tf.invalidateMeasurementCache()
                 tf.invalidateIntrinsicContentSize()
             }
         }
@@ -452,9 +454,9 @@ struct OutlineTextField: NSViewRepresentable {
                 // Install right-click context menu monitor for formatting
                 tf.installContextMenuMonitor()
                 tf.installLinkClickMonitor()
-                tf.installSelectionRestyleObserver { [weak tf, weak self] in
+                tf.installSelectionObserver { [weak tf, weak self] in
                     guard let tf, let self else { return }
-                    Self.restyleEditor(tf, parent: self.parent)
+                    Self.updateTypingAttributes(tf, parent: self.parent)
                 }
 
                 // NSTextField's shared field editor starts from stringValue, not the
@@ -473,24 +475,36 @@ struct OutlineTextField: NSViewRepresentable {
             guard let tf = obj.object as? StrataTextField,
                   let editor = tf.currentEditor() as? NSTextView else { return }
             guard !tf.isApplyingProgrammaticStyle else { return }
-            _ = Self.convertMarkdownSyntax(in: editor)
+            let convertedMarkdown = Self.convertMarkdownSyntax(in: editor)
             let newValue = tf.stringValue
             let newFormatting = Self.extractFormatting(from: editor.textStorage)
             guard newValue != parent.text || newFormatting != parent.formatting else { return }
+            let formattingChanged = newFormatting != parent.formatting
             parent.text = newValue
             parent.formatting = newFormatting
             parent.onTextChange()
+            tf.invalidateMeasurementCache()
             tf.invalidateIntrinsicContentSize()
 
-            // Immediately restyle to prevent formatting jumps between keystrokes
-            Self.restyleEditor(tf, parent: parent)
+            // Plain typing already updates the field editor's attributed storage.
+            // Full restyling is only needed when markdown markers were converted,
+            // formatting spans changed, or search highlighting must be reapplied.
+            if convertedMarkdown || formattingChanged || !parent.searchQuery.isEmpty {
+                Self.restyleEditor(tf, parent: parent)
+            } else {
+                tf.lastStyledText = newValue
+                tf.lastStyledFormatting = newFormatting
+                tf.lastStyledDone = parent.isDone
+                tf.lastStyledSearch = parent.searchQuery
+                Self.updateTypingAttributes(tf, parent: parent)
+            }
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
             if let tf = obj.object as? StrataTextField {
                 tf.removeContextMenuMonitor()
                 tf.removeLinkClickMonitor()
-                tf.removeSelectionRestyleObserver()
+                tf.removeSelectionObserver()
                 tf.lastStyledText = nil
                 tf.lastStyledFormatting = nil
                 if StrataTextField.currentEditingField === tf {
@@ -543,7 +557,21 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledFormatting = parent.formatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
+            tf.invalidateMeasurementCache()
             tf.invalidateIntrinsicContentSize()
+        }
+
+        static func updateTypingAttributes(_ tf: StrataTextField, parent: OutlineTextField) {
+            guard let editor = tf.currentEditor() as? NSTextView,
+                  let storage = editor.textStorage else { return }
+
+            let baseColor: NSColor = parent.isDone ? .tertiaryLabelColor : .labelColor
+            editor.typingAttributes = OutlineTextField.typingAttributes(
+                in: storage,
+                near: editor.selectedRange,
+                fallbackFont: OutlineTextField.font,
+                fallbackColor: baseColor
+            )
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -738,6 +766,9 @@ class StrataTextField: NSTextField {
     var routeNextUndoToStore = false
     var routeNextRedoToStore = false
     var isApplyingProgrammaticStyle: Bool { programmaticStyleDepth > 0 }
+    private var cachedMeasureWidth: CGFloat = 0
+    private var cachedMeasureSignature = ""
+    private var cachedMeasureHeight: CGFloat = 0
 
     // Style tracking to avoid redundant restyling in updateNSView
     var lastStyledText: String?
@@ -748,9 +779,8 @@ class StrataTextField: NSTextField {
     // Context menu event monitor
     private var rightClickMonitor: Any?
     private var linkClickMonitor: Any?
-    private var selectionRestyleObserver: NSObjectProtocol?
-    private var pendingSelectionRestyle = false
-    private var isRestylingSelection = false
+    private var selectionObserver: NSObjectProtocol?
+    private var pendingSelectionUpdate = false
 
     override var intrinsicContentSize: NSSize {
         if preferredMaxLayoutWidth > 0 {
@@ -778,6 +808,12 @@ class StrataTextField: NSTextField {
                     .paragraphStyle: OutlineTextField.paragraphStyle
                 ]
             )
+        }
+
+        let signature = measurementSignature(for: attributed)
+        if abs(cachedMeasureWidth - measurementWidth) < 0.5,
+           cachedMeasureSignature == signature {
+            return cachedMeasureHeight
         }
 
         if attributed.length > 0 {
@@ -810,7 +846,35 @@ class StrataTextField: NSTextField {
         layoutManager.ensureLayout(for: textContainer)
 
         let rect = layoutManager.usedRect(for: textContainer)
-        return max(ceil(rect.height) + 8, 24)
+        let height = max(ceil(rect.height) + 8, 24)
+        cachedMeasureWidth = measurementWidth
+        cachedMeasureSignature = signature
+        cachedMeasureHeight = height
+        return height
+    }
+
+    func invalidateMeasurementCache() {
+        cachedMeasureSignature = ""
+        cachedMeasureHeight = 0
+    }
+
+    private func measurementSignature(for attributed: NSAttributedString) -> String {
+        var signature = "\(attributed.string)|\(attributed.length)"
+        let fullRange = NSRange(location: 0, length: attributed.length)
+        guard fullRange.length > 0 else { return signature }
+
+        attributed.enumerateAttributes(in: fullRange) { attributes, range, _ in
+            if let font = attributes[.font] as? NSFont {
+                signature += "|f:\(range.location):\(range.length):\(font.fontName):\(font.pointSize)"
+            }
+            if attributes[.backgroundColor] != nil {
+                signature += "|b:\(range.location):\(range.length)"
+            }
+            if let link = attributes[.link] {
+                signature += "|l:\(range.location):\(range.length):\(link)"
+            }
+        }
+        return signature
     }
 
     override func layout() {
@@ -825,7 +889,7 @@ class StrataTextField: NSTextField {
     deinit {
         removeContextMenuMonitor()
         removeLinkClickMonitor()
-        removeSelectionRestyleObserver()
+        removeSelectionObserver()
     }
 
     var onCmdEnter: (() -> Void)?
@@ -936,38 +1000,35 @@ class StrataTextField: NSTextField {
         return nil
     }
 
-    func installSelectionRestyleObserver(_ restyle: @escaping () -> Void) {
-        removeSelectionRestyleObserver()
+    func installSelectionObserver(_ update: @escaping () -> Void) {
+        removeSelectionObserver()
         guard let editor = currentEditor() as? NSTextView else { return }
 
-        selectionRestyleObserver = NotificationCenter.default.addObserver(
+        selectionObserver = NotificationCenter.default.addObserver(
             forName: NSTextView.didChangeSelectionNotification,
             object: editor,
             queue: .main
         ) { [weak self] _ in
-            self?.scheduleSelectionRestyle(restyle)
+            self?.scheduleSelectionUpdate(update)
         }
     }
 
-    func removeSelectionRestyleObserver() {
-        if let observer = selectionRestyleObserver {
+    func removeSelectionObserver() {
+        if let observer = selectionObserver {
             NotificationCenter.default.removeObserver(observer)
-            selectionRestyleObserver = nil
+            selectionObserver = nil
         }
-        pendingSelectionRestyle = false
-        isRestylingSelection = false
+        pendingSelectionUpdate = false
     }
 
-    private func scheduleSelectionRestyle(_ restyle: @escaping () -> Void) {
-        guard !isRestylingSelection, !pendingSelectionRestyle else { return }
-        pendingSelectionRestyle = true
+    private func scheduleSelectionUpdate(_ update: @escaping () -> Void) {
+        guard !pendingSelectionUpdate else { return }
+        pendingSelectionUpdate = true
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.pendingSelectionRestyle = false
-            self.isRestylingSelection = true
-            restyle()
-            self.isRestylingSelection = false
+            self.pendingSelectionUpdate = false
+            update()
         }
     }
 

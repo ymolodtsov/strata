@@ -965,6 +965,21 @@ class OutlineStore {
         return true
     }
 
+    func updateDropTarget(_ targetId: UUID, above: Bool) {
+        if dropTargetId != targetId {
+            dropTargetId = targetId
+        }
+        if dropAbove != above {
+            dropAbove = above
+        }
+    }
+
+    func clearDropTarget(_ targetId: UUID) {
+        if dropTargetId == targetId {
+            dropTargetId = nil
+        }
+    }
+
     func performDrop() -> Bool {
         guard let targetId = dropTargetId, !draggedNodeIds.isEmpty else {
             endDrag()
