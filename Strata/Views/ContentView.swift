@@ -78,7 +78,7 @@ struct ContentView: View {
                     .padding(.bottom, 60)
                     .padding(.horizontal, 28)
                 }
-                .scrollEdgeEffectStyle(nil, for: .top)
+                .scrollEdgeEffectHidden(true, for: .top)
                 .onChange(of: store.pendingFocusId) { _, newId in
                     if let id = newId {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -269,113 +269,6 @@ struct ContentView: View {
     }
 }
 
-private struct ScrollEdgeSuppressor: NSViewRepresentable {
-    func makeNSView(context: Context) -> ScrollEdgeSuppressorNSView {
-        ScrollEdgeSuppressorNSView()
-    }
-
-    func updateNSView(_ nsView: ScrollEdgeSuppressorNSView, context: Context) {
-        nsView.suppressOwningScrollView()
-    }
-}
-
-private final class WeakScrollEdgeTarget {
-    weak var view: NSView?
-
-    init(_ view: NSView) {
-        self.view = view
-    }
-}
-
-private final class ScrollEdgeSuppressorNSView: NSView {
-    private weak var cachedScrollView: NSScrollView?
-    private var cachedTargets: [WeakScrollEdgeTarget] = []
-    private var lastTargetRefreshTime: TimeInterval = 0
-    private let targetRefreshInterval: TimeInterval = 0.5
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        invalidateSuppressionCache()
-        suppressOwningScrollView(forceRefresh: true)
-    }
-
-    override func viewDidMoveToSuperview() {
-        super.viewDidMoveToSuperview()
-        invalidateSuppressionCache()
-        suppressOwningScrollView(forceRefresh: true)
-    }
-
-    override func layout() {
-        super.layout()
-        suppressOwningScrollView()
-    }
-
-    override func viewWillDraw() {
-        suppressOwningScrollView()
-        super.viewWillDraw()
-    }
-
-    func suppressOwningScrollView(forceRefresh: Bool = false) {
-        guard let scrollView = cachedScrollView ?? nearestScrollView() else { return }
-        cachedScrollView = scrollView
-
-        let now = ProcessInfo.processInfo.systemUptime
-        if forceRefresh || cachedTargets.isEmpty || now - lastTargetRefreshTime > targetRefreshInterval {
-            refreshTargets(in: scrollView, now: now)
-        }
-        hideCachedTargets()
-    }
-
-    private func invalidateSuppressionCache() {
-        cachedScrollView = nil
-        cachedTargets.removeAll()
-        lastTargetRefreshTime = 0
-    }
-
-    private func nearestScrollView() -> NSScrollView? {
-        var candidate = superview
-        while let view = candidate {
-            if let scrollView = view as? NSScrollView {
-                return scrollView
-            }
-            candidate = view.superview
-        }
-        return nil
-    }
-
-    private func refreshTargets(in scrollView: NSScrollView, now: TimeInterval) {
-        var targets: [NSView] = []
-        collectScrollEdgeTargets(in: scrollView, insidePocket: false, targets: &targets)
-        cachedTargets = targets.map(WeakScrollEdgeTarget.init)
-        lastTargetRefreshTime = now
-    }
-
-    private func hideCachedTargets() {
-        cachedTargets = cachedTargets.filter { target in
-            guard let view = target.view else { return false }
-            view.isHidden = true
-            view.alphaValue = 0
-            return true
-        }
-    }
-
-    private func collectScrollEdgeTargets(in view: NSView, insidePocket: Bool, targets: inout [NSView]) {
-        let className = NSStringFromClass(type(of: view))
-        let isPocket = insidePocket || className.contains("NSScrollPocket")
-        let isTopBackdrop = className.contains("BackdropView") &&
-            view.frame.minY == 0 &&
-            view.frame.height <= 80
-
-        if isPocket || isTopBackdrop {
-            targets.append(view)
-        }
-
-        for subview in view.subviews {
-            collectScrollEdgeTargets(in: subview, insidePocket: isPocket, targets: &targets)
-        }
-    }
-}
-
 private struct SelectionBarView: View {
     @Bindable var store: OutlineStore
 
@@ -455,9 +348,6 @@ struct WindowConfigurator: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = WindowConfigurationNSView()
-        view.onBeforeDraw = { window in
-            WindowTabCoordinator.suppressScrollEdgeEffects(in: window)
-        }
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(view.window)
             if let window = view.window {
@@ -470,11 +360,6 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        if let view = nsView as? WindowConfigurationNSView {
-            view.onBeforeDraw = { window in
-                WindowTabCoordinator.suppressScrollEdgeEffects(in: window)
-            }
-        }
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(nsView.window)
             if let window = nsView.window {
@@ -558,38 +443,26 @@ struct WindowConfigurator: NSViewRepresentable {
         }
 
         func windowDidUpdate(_ notification: Notification) {
-            WindowTabCoordinator.suppressScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
 
         func windowDidBecomeKey(_ notification: Notification) {
-            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
 
         func windowDidBecomeMain(_ notification: Notification) {
-            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
 
         func windowDidResize(_ notification: Notification) {
-            WindowTabCoordinator.refreshScrollEdgeEffects(in: notification.object as? NSWindow)
+            WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
     }
 }
 
 final class WindowConfigurationNSView: NSView {
-    var onBeforeDraw: ((NSWindow?) -> Void)?
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        WindowTabCoordinator.refreshScrollEdgeEffects(in: window)
-    }
-
-    override func layout() {
-        super.layout()
-        onBeforeDraw?(window)
-    }
-
-    override func viewWillDraw() {
-        onBeforeDraw?(window)
-        super.viewWillDraw()
+        WindowTabCoordinator.configure(window)
     }
 }

@@ -3,24 +3,8 @@ import SwiftUI
 // MARK: - Session State (persists open document tabs across launches)
 
 enum WindowTabCoordinator {
-    private final class WeakViewReference {
-        weak var view: NSView?
-
-        init(_ view: NSView) {
-            self.view = view
-        }
-    }
-
-    private struct SuppressionState {
-        var targets: [WeakViewReference] = []
-        var isRefreshScheduled = false
-        var lastRefreshTime: TimeInterval = 0
-    }
-
     private static weak var requestedParentWindow: NSWindow?
     private static var pendingTabCount = 0
-    private static var configuredChromeWindowIds = Set<ObjectIdentifier>()
-    private static var suppressionStates: [ObjectIdentifier: SuppressionState] = [:]
 
     static func requestNextWindowAsTab() {
         if requestedParentWindow == nil {
@@ -83,22 +67,6 @@ enum WindowTabCoordinator {
         }
     }
 
-    static func suppressScrollEdgeEffects(in window: NSWindow?) {
-        guard let window else { return }
-        applyScrollEdgeSuppression(in: window, refreshTargets: false)
-    }
-
-    static func refreshScrollEdgeEffects(in window: NSWindow?) {
-        guard let window else { return }
-        applyScrollEdgeSuppression(in: window, refreshTargets: true)
-    }
-
-    static func forget(window: NSWindow) {
-        let windowId = ObjectIdentifier(window)
-        configuredChromeWindowIds.remove(windowId)
-        suppressionStates.removeValue(forKey: windowId)
-    }
-
     private static func configurePresentation(_ window: NSWindow) {
         configureTabbingMode(window)
         configureTabBarVisibility(window)
@@ -136,137 +104,6 @@ enum WindowTabCoordinator {
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
-
-        let windowId = ObjectIdentifier(window)
-        if configuredChromeWindowIds.insert(windowId).inserted {
-            scheduleScrollEdgeSuppression(in: window)
-        } else {
-            applyScrollEdgeSuppression(in: window, refreshTargets: false)
-        }
-    }
-
-    private static func scheduleScrollEdgeSuppression(in window: NSWindow) {
-        applyScrollEdgeSuppression(in: window, refreshTargets: true)
-
-        // Tahoe can rebuild the titlebar scroll-edge pocket after the window
-        // becomes key or after native tabs settle. Reapply over the next run
-        // loop turns so the final AppKit-created 1px rule stays hidden.
-        for delay in [0.0, 0.03, 0.12, 0.35] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
-                guard let window else { return }
-                applyScrollEdgeSuppression(in: window, refreshTargets: true)
-            }
-        }
-    }
-
-    private static func applyScrollEdgeSuppression(in window: NSWindow, refreshTargets: Bool) {
-        window.titlebarSeparatorStyle = .none
-        suppressionStates.removeValue(forKey: ObjectIdentifier(window))
-    }
-
-    private static func refreshSuppressionTargets(in window: NSWindow) {
-        guard let frameView = window.contentView?.superview else { return }
-        var targets: [NSView] = []
-        collectScrollEdgeEffectTargets(
-            in: frameView,
-            insideTitlebarContainer: false,
-            insideTitlebarBackground: false,
-            insideContentScrollView: false,
-            insideContentScrollPocket: false,
-            targets: &targets
-        )
-
-        let windowId = ObjectIdentifier(window)
-        var state = suppressionStates[windowId] ?? SuppressionState()
-        state.targets = targets.map(WeakViewReference.init)
-        state.isRefreshScheduled = false
-        state.lastRefreshTime = ProcessInfo.processInfo.systemUptime
-        suppressionStates[windowId] = state
-        hideCachedSuppressionTargets(for: window)
-    }
-
-    private static func hideCachedSuppressionTargets(for window: NSWindow) {
-        let windowId = ObjectIdentifier(window)
-        guard var state = suppressionStates[windowId] else { return }
-        state.targets = state.targets.filter { reference in
-            guard let view = reference.view else { return false }
-            view.isHidden = true
-            view.alphaValue = 0
-            return true
-        }
-        suppressionStates[windowId] = state
-    }
-
-    private static func scheduleSuppressionTargetRefreshIfNeeded(in window: NSWindow) {
-        let windowId = ObjectIdentifier(window)
-        var state = suppressionStates[windowId] ?? SuppressionState()
-        guard !state.isRefreshScheduled else { return }
-        guard ProcessInfo.processInfo.systemUptime - state.lastRefreshTime > 0.5 else { return }
-
-        state.isRefreshScheduled = true
-        suppressionStates[windowId] = state
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak window] in
-            guard let window else { return }
-            refreshSuppressionTargets(in: window)
-        }
-    }
-
-    @discardableResult
-    private static func collectScrollEdgeEffectTargets(
-        in view: NSView,
-        insideTitlebarContainer: Bool,
-        insideTitlebarBackground: Bool,
-        insideContentScrollView: Bool,
-        insideContentScrollPocket: Bool,
-        targets: inout [NSView]
-    ) -> Bool {
-        let className = NSStringFromClass(type(of: view))
-        let isTitlebarContainer = insideTitlebarContainer || className.contains("NSTitlebarContainerView")
-        let isTitlebarBackground = insideTitlebarBackground || className.contains("NSTitlebarBackgroundView")
-        let isContentScrollView = !isTitlebarContainer && (insideContentScrollView || view is NSScrollView)
-        let isContentScrollPocket = !isTitlebarContainer && (insideContentScrollPocket || className.contains("NSScrollPocket"))
-        var foundEffect = false
-
-        // The titlebar mirror is useful for full-size-content windows where
-        // content scrolls underneath the titlebar. Strata keeps document content
-        // below the titlebar, so the mirror can only add a stray translucent band.
-        if isTitlebarContainer && className.contains("NSScrollViewMirrorView") {
-            targets.append(view)
-            foundEffect = true
-        }
-
-        // SwiftUI's macOS 26 HostingScrollView can still draw a top
-        // NSScrollPocket even with zero content insets. Suppress it before draw
-        // so the document surface stays visually continuous while scrolling.
-        let isTopScrollBackdrop = isContentScrollView &&
-            className.contains("BackdropView") &&
-            view.frame.minY == 0 &&
-            view.frame.height <= 80
-        if isContentScrollPocket || isTopScrollBackdrop {
-            targets.append(view)
-            foundEffect = true
-        }
-
-        // Tahoe's titlebar scroll edge can leave a hard 1px rule after tabbing.
-        let isHairline = view.frame.height <= 1.5 && view.frame.width > 0
-        if isTitlebarBackground && (className.contains("_NSLayerBasedFillColorView") || isHairline) {
-            targets.append(view)
-            foundEffect = true
-        }
-
-        for subview in view.subviews {
-            foundEffect = collectScrollEdgeEffectTargets(
-                in: subview,
-                insideTitlebarContainer: isTitlebarContainer,
-                insideTitlebarBackground: isTitlebarBackground,
-                insideContentScrollView: isContentScrollView,
-                insideContentScrollPocket: isContentScrollPocket,
-                targets: &targets
-            ) || foundEffect
-        }
-
-        return foundEffect
     }
 }
 
@@ -667,7 +504,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] notification in
             guard let window = notification.object as? NSWindow else { return }
             guard self?.isTerminating != true else { return }
-            WindowTabCoordinator.forget(window: window)
             SessionState.forgetAndSave(window: window)
             DispatchQueue.main.async {
                 WindowTabCoordinator.configureVisibleWindows()
