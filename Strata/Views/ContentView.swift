@@ -78,6 +78,7 @@ struct ContentView: View {
                     .padding(.bottom, 60)
                     .padding(.horizontal, 28)
                 }
+                .scrollEdgeEffectHidden(true, for: .top)
                 .onChange(of: store.pendingFocusId) { _, newId in
                     if let id = newId {
                         withAnimation(.easeInOut(duration: 0.15)) {
