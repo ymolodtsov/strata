@@ -58,6 +58,8 @@ enum WindowTabCoordinator {
     }
 
     private static func configureChrome(_ window: NSWindow) {
+        window.isRestorable = false
+        window.restorationClass = nil
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.toolbarStyle = .automatic
@@ -409,6 +411,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         SessionState.saveOpenDocuments()
+    }
+
+    func application(_ application: NSApplication, shouldSaveSecureApplicationState coder: NSCoder) -> Bool {
+        false
+    }
+
+    func application(_ application: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool {
+        false
     }
 
     deinit {
