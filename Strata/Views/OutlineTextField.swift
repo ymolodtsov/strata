@@ -160,9 +160,11 @@ struct OutlineTextField: NSViewRepresentable {
             if storage.string != currentText {
                 let range = editor.selectedRange
                 editor.undoManager?.disableUndoRegistration()
+                tf.beginProgrammaticStyle()
                 storage.beginEditing()
                 storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: currentText)
                 storage.endEditing()
+                tf.endProgrammaticStyle()
                 editor.undoManager?.enableUndoRegistration()
                 let safeLoc = min(range.location, (currentText as NSString).length)
                 editor.setSelectedRange(NSRange(location: safeLoc, length: 0))
@@ -183,6 +185,7 @@ struct OutlineTextField: NSViewRepresentable {
             let fullRange = NSRange(location: 0, length: storage.length)
 
             editor.undoManager?.disableUndoRegistration()
+            tf.beginProgrammaticStyle()
             storage.beginEditing()
             storage.addAttributes([.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle], range: fullRange)
             storage.removeAttribute(.link, range: fullRange)
@@ -197,17 +200,19 @@ struct OutlineTextField: NSViewRepresentable {
                 Self.applySearchHighlight(to: storage, query: searchQ)
             }
             storage.endEditing()
+            tf.endProgrammaticStyle()
             editor.undoManager?.enableUndoRegistration()
 
             if savedRange.location + savedRange.length <= storage.length {
                 editor.setSelectedRange(savedRange)
             }
 
-            editor.typingAttributes = [
-                .font: font,
-                .foregroundColor: baseColor,
-                .paragraphStyle: Self.paragraphStyle
-            ]
+            editor.typingAttributes = Self.typingAttributes(
+                in: storage,
+                near: editor.selectedRange,
+                fallbackFont: font,
+                fallbackColor: baseColor
+            )
 
             tf.lastStyledText = storage.string
             tf.lastStyledFormatting = currentFormatting
@@ -331,6 +336,37 @@ struct OutlineTextField: NSViewRepresentable {
         }
     }
 
+    static func typingAttributes(
+        in storage: NSTextStorage,
+        near selection: NSRange,
+        fallbackFont: NSFont,
+        fallbackColor: NSColor
+    ) -> [NSAttributedString.Key: Any] {
+        let length = storage.length
+        guard length > 0 else {
+            return [
+                .font: fallbackFont,
+                .foregroundColor: fallbackColor,
+                .paragraphStyle: paragraphStyle
+            ]
+        }
+
+        let index: Int
+        if selection.location < length {
+            index = selection.location
+        } else {
+            index = max(0, length - 1)
+        }
+
+        var attributes = storage.attributes(at: index, effectiveRange: nil)
+        attributes[.font] = attributes[.font] ?? fallbackFont
+        attributes[.foregroundColor] = attributes[.foregroundColor] ?? fallbackColor
+        attributes[.paragraphStyle] = paragraphStyle
+        attributes.removeValue(forKey: .link)
+        attributes.removeValue(forKey: .underlineStyle)
+        return attributes
+    }
+
     // MARK: - Coordinator
 
     class Coordinator: NSObject, NSTextFieldDelegate {
@@ -346,6 +382,9 @@ struct OutlineTextField: NSViewRepresentable {
             // Configure field editor: fix text shift + enable wrapping
             if let tf = obj.object as? StrataTextField,
                let editor = tf.currentEditor() as? NSTextView {
+                tf.beginProgrammaticStyle()
+                defer { tf.endProgrammaticStyle() }
+
                 StrataTextField.currentEditingField = tf
                 editor.textContainerInset = .zero
                 editor.textContainer?.lineFragmentPadding = 0
@@ -381,6 +420,7 @@ struct OutlineTextField: NSViewRepresentable {
         func controlTextDidChange(_ obj: Notification) {
             guard let tf = obj.object as? StrataTextField,
                   let editor = tf.currentEditor() as? NSTextView else { return }
+            guard !tf.isApplyingProgrammaticStyle else { return }
             _ = Self.convertMarkdownSyntax(in: editor)
             let newValue = tf.stringValue
             let newFormatting = Self.extractFormatting(from: editor.textStorage)
@@ -421,6 +461,7 @@ struct OutlineTextField: NSViewRepresentable {
             let searchQ = parent.searchQuery
 
             editor.undoManager?.disableUndoRegistration()
+            tf.beginProgrammaticStyle()
             storage.beginEditing()
             storage.addAttributes([
                 .font: font,
@@ -439,17 +480,19 @@ struct OutlineTextField: NSViewRepresentable {
                 OutlineTextField.applySearchHighlight(to: storage, query: searchQ)
             }
             storage.endEditing()
+            tf.endProgrammaticStyle()
             editor.undoManager?.enableUndoRegistration()
 
             if savedRange.location + savedRange.length <= storage.length {
                 editor.setSelectedRange(savedRange)
             }
 
-            editor.typingAttributes = [
-                .font: font,
-                .foregroundColor: baseColor,
-                .paragraphStyle: OutlineTextField.paragraphStyle
-            ]
+            editor.typingAttributes = OutlineTextField.typingAttributes(
+                in: storage,
+                near: editor.selectedRange,
+                fallbackFont: font,
+                fallbackColor: baseColor
+            )
 
             tf.lastStyledText = storage.string
             tf.lastStyledFormatting = parent.formatting
@@ -629,6 +672,8 @@ class StrataTextField: NSTextField {
     static weak var currentEditingField: StrataTextField?
 
     private var lastKnownWidth: CGFloat = 0
+    private var programmaticStyleDepth = 0
+    var isApplyingProgrammaticStyle: Bool { programmaticStyleDepth > 0 }
 
     // Style tracking to avoid redundant restyling in updateNSView
     var lastStyledText: String?
@@ -676,7 +721,7 @@ class StrataTextField: NSTextField {
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
 
-        return max(ceil(rect.height), 22)
+        return max(ceil(rect.height) + 4, 24)
     }
 
     override func layout() {
@@ -704,6 +749,14 @@ class StrataTextField: NSTextField {
     var onShiftUp: (() -> Void)?
     var onShiftDown: (() -> Void)?
     var onPasteNodes: (() -> Void)?
+
+    func beginProgrammaticStyle() {
+        programmaticStyleDepth += 1
+    }
+
+    func endProgrammaticStyle() {
+        programmaticStyleDepth = max(0, programmaticStyleDepth - 1)
+    }
 
     // MARK: - Context Menu
 
