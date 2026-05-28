@@ -1249,20 +1249,6 @@ class StrataTextField: NSTextField {
             return true
         }
 
-        // Tab — indent node
-        if event.keyCode == 48 && flags.isEmpty {
-            if onTab?() == true {
-                markStructuralEditForUndo()
-            }
-            return true
-        }
-        // Shift+Tab — unindent node
-        if event.keyCode == 48 && flags == .shift {
-            if onBackTab?() == true {
-                markStructuralEditForUndo()
-            }
-            return true
-        }
         // Shift+Up — start block selection upward
         if event.keyCode == 126 && flags == .shift {
             guard shouldPromoteTextSelectionToNodeSelection(.up) else {
