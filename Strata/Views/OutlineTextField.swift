@@ -69,7 +69,7 @@ struct OutlineTextField: NSViewRepresentable {
             string: "...",
             attributes: [
                 .font: Self.font,
-                .foregroundColor: NSColor.secondaryLabelColor
+                .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.45)
             ]
         )
         tf.onCmdEnter = { context.coordinator.parent.onToggleDone() }
