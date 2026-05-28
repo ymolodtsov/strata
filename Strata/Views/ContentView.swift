@@ -78,7 +78,7 @@ struct ContentView: View {
                     .padding(.bottom, 60)
                     .padding(.horizontal, 28)
                 }
-                .scrollEdgeEffectHidden(true, for: .top)
+                .scrollEdgeEffectStyle(nil, for: .top)
                 .onChange(of: store.pendingFocusId) { _, newId in
                     if let id = newId {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -347,7 +347,10 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = WindowConfigurationNSView()
+        view.onBeforeDraw = { window in
+            WindowTabCoordinator.suppressScrollEdgeEffects(in: window)
+        }
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(view.window)
             if let window = view.window {
@@ -360,6 +363,11 @@ struct WindowConfigurator: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        if let view = nsView as? WindowConfigurationNSView {
+            view.onBeforeDraw = { window in
+                WindowTabCoordinator.suppressScrollEdgeEffects(in: window)
+            }
+        }
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(nsView.window)
             if let window = nsView.window {
@@ -441,5 +449,24 @@ struct WindowConfigurator: NSViewRepresentable {
                 self.bypassClosePrompt = false
             }
         }
+    }
+}
+
+final class WindowConfigurationNSView: NSView {
+    var onBeforeDraw: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onBeforeDraw?(window)
+    }
+
+    override func layout() {
+        super.layout()
+        onBeforeDraw?(window)
+    }
+
+    override func viewWillDraw() {
+        onBeforeDraw?(window)
+        super.viewWillDraw()
     }
 }

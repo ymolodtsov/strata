@@ -64,14 +64,36 @@ enum WindowTabCoordinator {
         }
     }
 
+    static func suppressScrollEdgeEffects(in window: NSWindow?) {
+        guard let window else { return }
+        applyScrollEdgeSuppression(in: window)
+    }
+
     private static func configurePresentation(_ window: NSWindow) {
         configureTabbingMode(window)
+        configureTabBarVisibility(window)
         configureChrome(window)
+        configureScrollViews(in: window)
     }
 
     private static func configureTabbingMode(_ window: NSWindow) {
         window.tabbingIdentifier = NSWindow.TabbingIdentifier("family.ma.strata.document")
         window.tabbingMode = .preferred
+    }
+
+    private static func configureTabBarVisibility(_ window: NSWindow) {
+        guard let tabGroup = window.tabGroup else { return }
+        let shouldShowTabBar = tabGroup.windows.count > 1
+        guard tabGroup.isTabBarVisible != shouldShowTabBar else { return }
+
+        let animationBehavior = window.animationBehavior
+        window.animationBehavior = .none
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            window.toggleTabBar(nil)
+        }
+        window.animationBehavior = animationBehavior
     }
 
     private static func configureChrome(_ window: NSWindow) {
@@ -81,11 +103,30 @@ enum WindowTabCoordinator {
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
-        scheduleTitlebarRuleSuppression(in: window)
+        scheduleScrollEdgeSuppression(in: window)
     }
 
-    private static func scheduleTitlebarRuleSuppression(in window: NSWindow) {
-        applyTitlebarRuleSuppression(in: window)
+    private static func configureScrollViews(in window: NSWindow) {
+        guard let frameView = window.contentView?.superview else { return }
+        configureScrollViews(in: frameView)
+    }
+
+    private static func configureScrollViews(in view: NSView) {
+        if let scrollView = view as? NSScrollView {
+            scrollView.automaticallyAdjustsContentInsets = false
+            scrollView.contentInsets = NSEdgeInsetsZero
+            scrollView.scrollerInsets = NSEdgeInsetsZero
+            scrollView.contentView.automaticallyAdjustsContentInsets = false
+            scrollView.contentView.contentInsets = NSEdgeInsetsZero
+        }
+
+        for subview in view.subviews {
+            configureScrollViews(in: subview)
+        }
+    }
+
+    private static func scheduleScrollEdgeSuppression(in window: NSWindow) {
+        applyScrollEdgeSuppression(in: window)
 
         // Tahoe can rebuild the titlebar scroll-edge pocket after the window
         // becomes key or after native tabs settle. Reapply over the next run
@@ -93,40 +134,70 @@ enum WindowTabCoordinator {
         for delay in [0.0, 0.03, 0.12, 0.35] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
                 guard let window else { return }
-                applyTitlebarRuleSuppression(in: window)
+                applyScrollEdgeSuppression(in: window)
             }
         }
     }
 
-    private static func applyTitlebarRuleSuppression(in window: NSWindow) {
+    private static func applyScrollEdgeSuppression(in window: NSWindow) {
         window.titlebarSeparatorStyle = .none
-        suppressTitlebarScrollEdgeRule(in: window)
+        suppressTitlebarScrollEdgeEffects(in: window)
     }
 
-    private static func suppressTitlebarScrollEdgeRule(in window: NSWindow) {
+    private static func suppressTitlebarScrollEdgeEffects(in window: NSWindow) {
         guard let frameView = window.contentView?.superview else { return }
-        hideScrollEdgeRule(in: frameView, insideTitlebarBackground: false)
+        hideScrollEdgeEffects(in: frameView, insideTitlebarContainer: false, insideTitlebarBackground: false)
     }
 
     @discardableResult
-    private static func hideScrollEdgeRule(in view: NSView, insideTitlebarBackground: Bool) -> Bool {
+    private static func hideScrollEdgeEffects(
+        in view: NSView,
+        insideTitlebarContainer: Bool,
+        insideTitlebarBackground: Bool,
+        insideContentScrollPocket: Bool = false
+    ) -> Bool {
         let className = NSStringFromClass(type(of: view))
+        let isTitlebarContainer = insideTitlebarContainer || className.contains("NSTitlebarContainerView")
         let isTitlebarBackground = insideTitlebarBackground || className.contains("NSTitlebarBackgroundView")
-        var foundRule = false
+        let isContentScrollPocket = !isTitlebarContainer && (insideContentScrollPocket || className.contains("NSScrollPocket"))
+        var foundEffect = false
+
+        // The titlebar mirror is useful for full-size-content windows where
+        // content scrolls underneath the titlebar. Strata keeps document content
+        // below the titlebar, so the mirror can only add a stray translucent band.
+        if isTitlebarContainer && className.contains("NSScrollViewMirrorView") {
+            view.isHidden = true
+            view.alphaValue = 0
+            foundEffect = true
+        }
+
+        // SwiftUI's macOS 26 HostingScrollView can still draw a top
+        // NSScrollPocket even with zero content insets. Suppress it before draw
+        // so the document surface stays visually continuous while scrolling.
+        if isContentScrollPocket {
+            view.isHidden = true
+            view.alphaValue = 0
+            foundEffect = true
+        }
 
         // Tahoe's titlebar scroll edge can leave a hard 1px rule after tabbing.
         let isHairline = view.frame.height <= 1.5 && view.frame.width > 0
         if isTitlebarBackground && (className.contains("_NSLayerBasedFillColorView") || isHairline) {
             view.isHidden = true
             view.alphaValue = 0
-            foundRule = true
+            foundEffect = true
         }
 
         for subview in view.subviews {
-            foundRule = hideScrollEdgeRule(in: subview, insideTitlebarBackground: isTitlebarBackground) || foundRule
+            foundEffect = hideScrollEdgeEffects(
+                in: subview,
+                insideTitlebarContainer: isTitlebarContainer,
+                insideTitlebarBackground: isTitlebarBackground,
+                insideContentScrollPocket: isContentScrollPocket
+            ) || foundEffect
         }
 
-        return foundRule
+        return foundEffect
     }
 }
 
