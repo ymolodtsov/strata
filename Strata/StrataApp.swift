@@ -169,25 +169,62 @@ extension FocusedValues {
 @Observable
 class RecentFiles {
     static let shared = RecentFiles()
+    private static let defaultsKey = "recentDocumentPaths"
+    private static let maxItems = 12
 
     private(set) var urls: [URL] = []
 
     init() {
-        urls = NSDocumentController.shared.recentDocumentURLs
+        refresh()
     }
 
     func refresh() {
-        urls = NSDocumentController.shared.recentDocumentURLs
+        urls = Self.loadPersistedURLs()
+        mergeNativeRecentDocuments()
     }
 
     func add(_ url: URL) {
-        NSDocumentController.shared.noteNewRecentDocumentURL(url)
-        urls = NSDocumentController.shared.recentDocumentURLs
+        let standardizedURL = url.standardizedFileURL
+        NSDocumentController.shared.noteNewRecentDocumentURL(standardizedURL)
+        urls.removeAll { $0.standardizedFileURL.path == standardizedURL.path }
+        urls.insert(standardizedURL, at: 0)
+        pruneAndPersist()
     }
 
     func clear() {
         NSDocumentController.shared.clearRecentDocuments(nil)
         urls = []
+        UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
+    }
+
+    private static func loadPersistedURLs() -> [URL] {
+        let paths = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        return paths
+            .map { URL(fileURLWithPath: $0).standardizedFileURL }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private func mergeNativeRecentDocuments() {
+        var merged = urls
+        for url in NSDocumentController.shared.recentDocumentURLs.map(\.standardizedFileURL) {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            if !merged.contains(where: { $0.path == url.path }) {
+                merged.append(url)
+            }
+        }
+        urls = merged
+        pruneAndPersist()
+    }
+
+    private func pruneAndPersist() {
+        var seen = Set<String>()
+        urls = urls
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            .filter { seen.insert($0.standardizedFileURL.path).inserted }
+        if urls.count > Self.maxItems {
+            urls = Array(urls.prefix(Self.maxItems))
+        }
+        UserDefaults.standard.set(urls.map(\.path), forKey: Self.defaultsKey)
     }
 }
 
@@ -370,7 +407,7 @@ struct StrataApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @FocusedValue(\.activeStore) var activeStore
     @FocusedValue(\.openWindowAction) var openWindowAction
-    private var recentFiles = RecentFiles.shared
+    @State private var recentFiles = RecentFiles.shared
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -457,16 +494,20 @@ struct StrataApp: App {
                 .keyboardShortcut("o")
 
                 Menu("Open Recent") {
-                    ForEach(recentFiles.urls, id: \.self) { url in
+                    let urls = recentFiles.urls
+                    ForEach(urls, id: \.self) { url in
                         Button(url.deletingPathExtension().lastPathComponent) {
                             openURLAsTab(url)
                         }
+                        .help(url.path)
                     }
-                    Divider()
+                    if !urls.isEmpty {
+                        Divider()
+                    }
                     Button("Clear Menu") {
                         recentFiles.clear()
                     }
-                    .disabled(recentFiles.urls.isEmpty)
+                    .disabled(urls.isEmpty)
                 }
             }
 
@@ -749,6 +790,13 @@ struct StrataApp: App {
 
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
     private func openURLAsTab(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            recentFiles.refresh()
+            NSSound.beep()
+            return
+        }
+
+        recentFiles.add(url)
         if let store = activeStore, store.currentFilePath == nil {
             // Current window is untitled — load into it
             store.loadFile(from: url)
