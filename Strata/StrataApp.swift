@@ -5,6 +5,7 @@ import SwiftUI
 enum WindowTabCoordinator {
     private static weak var requestedParentWindow: NSWindow?
     private static var pendingTabCount = 0
+    private static let toolbarIdentifier = NSToolbar.Identifier("family.ma.strata.window-toolbar")
 
     static func requestNextWindowAsTab() {
         if requestedParentWindow == nil {
@@ -16,11 +17,17 @@ enum WindowTabCoordinator {
     static func configure(_ window: NSWindow?) {
         guard let window else { return }
         window.tabbingMode = .preferred
+        configureChrome(window)
 
         guard let parent = requestedParentWindow,
               parent != window,
               pendingTabCount > 0,
               parent.isVisible else { return }
+
+        let alreadyTabbedWithParent =
+            parent.tabGroup?.windows.contains(window) == true ||
+            window.tabGroup?.windows.contains(parent) == true
+        guard !alreadyTabbedWithParent else { return }
 
         parent.addTabbedWindow(window, ordered: .above)
         pendingTabCount -= 1
@@ -28,6 +35,31 @@ enum WindowTabCoordinator {
             requestedParentWindow = nil
         }
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private static func configureChrome(_ window: NSWindow) {
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+        window.toolbarStyle = .unified
+        if window.toolbar == nil || window.toolbar?.identifier != toolbarIdentifier {
+            let toolbar = NSToolbar(identifier: toolbarIdentifier)
+            toolbar.displayMode = .iconOnly
+            toolbar.allowsUserCustomization = false
+            toolbar.delegate = EmptyToolbarDelegate.shared
+            window.toolbar = toolbar
+        }
+    }
+}
+
+private final class EmptyToolbarDelegate: NSObject, NSToolbarDelegate {
+    static let shared = EmptyToolbarDelegate()
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        []
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        []
     }
 }
 
