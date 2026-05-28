@@ -389,9 +389,8 @@ struct StrataApp: App {
                        let textView = window.firstResponder as? NSTextView,
                        textView.isFieldEditor {
                         if let field = StrataTextField.currentEditingField,
-                           field.routeNextUndoToStore {
-                            field.routeNextUndoToStore = false
-                            field.routeNextRedoToStore = true
+                           field.shouldRouteUndoToStore {
+                            field.consumeStructuralUndoRoute()
                             activeStore?.undo()
                             return
                         }
@@ -407,9 +406,8 @@ struct StrataApp: App {
                        let textView = window.firstResponder as? NSTextView,
                        textView.isFieldEditor {
                         if let field = StrataTextField.currentEditingField,
-                           field.routeNextRedoToStore {
-                            field.routeNextRedoToStore = false
-                            field.routeNextUndoToStore = true
+                           field.shouldRouteRedoToStore {
+                            field.consumeStructuralRedoRoute()
                             activeStore?.redo()
                             return
                         }

@@ -763,8 +763,8 @@ class StrataTextField: NSTextField {
 
     private var lastKnownWidth: CGFloat = 0
     private var programmaticStyleDepth = 0
-    var routeNextUndoToStore = false
-    var routeNextRedoToStore = false
+    private(set) var pendingStructuralUndoCount = 0
+    private(set) var pendingStructuralRedoCount = 0
     var isApplyingProgrammaticStyle: Bool { programmaticStyleDepth > 0 }
     private var cachedMeasureWidth: CGFloat = 0
     private var cachedMeasureSignature = ""
@@ -1094,8 +1094,26 @@ class StrataTextField: NSTextField {
     }
 
     func markStructuralEditForUndo() {
-        routeNextUndoToStore = true
-        routeNextRedoToStore = false
+        pendingStructuralUndoCount += 1
+        pendingStructuralRedoCount = 0
+    }
+
+    var shouldRouteUndoToStore: Bool {
+        pendingStructuralUndoCount > 0
+    }
+
+    var shouldRouteRedoToStore: Bool {
+        pendingStructuralRedoCount > 0
+    }
+
+    func consumeStructuralUndoRoute() {
+        pendingStructuralUndoCount = max(0, pendingStructuralUndoCount - 1)
+        pendingStructuralRedoCount += 1
+    }
+
+    func consumeStructuralRedoRoute() {
+        pendingStructuralRedoCount = max(0, pendingStructuralRedoCount - 1)
+        pendingStructuralUndoCount += 1
     }
 
     private func toggleFormatting(_ kind: TextFormattingKind) {
@@ -1185,9 +1203,8 @@ class StrataTextField: NSTextField {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if event.keyCode == 6 && flags == .command {
-            if routeNextUndoToStore {
-                routeNextUndoToStore = false
-                routeNextRedoToStore = true
+            if shouldRouteUndoToStore {
+                consumeStructuralUndoRoute()
                 onUndo?()
                 return true
             }
@@ -1195,9 +1212,8 @@ class StrataTextField: NSTextField {
             return true
         }
         if event.keyCode == 6 && flags == [.command, .shift] {
-            if routeNextRedoToStore {
-                routeNextRedoToStore = false
-                routeNextUndoToStore = true
+            if shouldRouteRedoToStore {
+                consumeStructuralRedoRoute()
                 onRedo?()
                 return true
             }
