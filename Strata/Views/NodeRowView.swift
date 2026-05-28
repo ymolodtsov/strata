@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 private enum OutlineLayoutMetrics {
     static let indentWidth: CGFloat = 24
-    static let guideInset: CGFloat = 11
     static let controlHeight: CGFloat = 26
     static let checkboxWidth: CGFloat = 22
     static let chevronWidth: CGFloat = 16
@@ -18,7 +17,7 @@ private enum OutlineLayoutMetrics {
     static let textTopOffset: CGFloat = 1
 
     static func guideX(forDepth depth: Int) -> CGFloat {
-        CGFloat(depth) * indentWidth + guideInset
+        CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + (bulletWidth / 2)
     }
 
     static func textLeading(forDepth depth: Int) -> CGFloat {
