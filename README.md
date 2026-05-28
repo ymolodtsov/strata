@@ -2,7 +2,7 @@
 
 Strata is a native macOS outliner for writing, thinking, planning, and restructuring ideas quickly. It is inspired by tools like Workflowy, but built as a document-based Mac app with OPML files, native windows, native tabs, and standard keyboard shortcuts.
 
-<img width="2162" height="1794" alt="CleanShot 2026-05-28 at 22 57 24@2x" src="https://github.com/user-attachments/assets/95c19997-47d3-4adf-97a6-55088319d8ad" />
+<img width="2162" height="1794" alt="screen" src="https://github.com/user-attachments/assets/a6603cec-e2df-4fb2-8c83-467822badc1a" />
 
 ## Features
 
