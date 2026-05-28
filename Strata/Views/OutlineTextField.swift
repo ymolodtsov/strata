@@ -30,6 +30,9 @@ struct OutlineTextField: NSViewRepresentable {
     var onPasteNodes: () -> Bool
     var onUndo: () -> Void
     var onRedo: () -> Void
+    var onStructuralEditForUndo: () -> Void
+    var shouldRouteStructuralUndoToStore: () -> Bool
+    var shouldRouteStructuralRedoToStore: () -> Bool
     var searchQuery: String
 
     static let font = NSFont.systemFont(ofSize: 15, weight: .regular)
@@ -81,6 +84,9 @@ struct OutlineTextField: NSViewRepresentable {
         tf.onPasteNodes = { context.coordinator.parent.onPasteNodes() }
         tf.onUndo = { context.coordinator.parent.onUndo() }
         tf.onRedo = { context.coordinator.parent.onRedo() }
+        tf.onStructuralEditForUndo = { context.coordinator.parent.onStructuralEditForUndo() }
+        tf.shouldRouteStructuralUndoToStore = { context.coordinator.parent.shouldRouteStructuralUndoToStore() }
+        tf.shouldRouteStructuralRedoToStore = { context.coordinator.parent.shouldRouteStructuralRedoToStore() }
 
         // Set baseline font once — used for layout sizing and placeholder
         tf.font = Self.font
@@ -130,6 +136,9 @@ struct OutlineTextField: NSViewRepresentable {
         nsView.onPasteNodes = { onPasteNodes() }
         nsView.onUndo = { onUndo() }
         nsView.onRedo = { onRedo() }
+        nsView.onStructuralEditForUndo = { onStructuralEditForUndo() }
+        nsView.shouldRouteStructuralUndoToStore = { shouldRouteStructuralUndoToStore() }
+        nsView.shouldRouteStructuralRedoToStore = { shouldRouteStructuralRedoToStore() }
 
         applyStyle(nsView)
 
@@ -904,6 +913,9 @@ class StrataTextField: NSTextField {
     var onPasteNodes: (() -> Bool)?
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
+    var onStructuralEditForUndo: (() -> Void)?
+    var shouldRouteStructuralUndoToStore: (() -> Bool)?
+    var shouldRouteStructuralRedoToStore: (() -> Bool)?
 
     func beginProgrammaticStyle() {
         programmaticStyleDepth += 1
@@ -1094,24 +1106,40 @@ class StrataTextField: NSTextField {
     }
 
     func markStructuralEditForUndo() {
+        if let onStructuralEditForUndo {
+            onStructuralEditForUndo()
+            return
+        }
         pendingStructuralUndoCount += 1
         pendingStructuralRedoCount = 0
     }
 
     var shouldRouteUndoToStore: Bool {
-        pendingStructuralUndoCount > 0
+        if let shouldRouteStructuralUndoToStore {
+            return shouldRouteStructuralUndoToStore()
+        }
+        return pendingStructuralUndoCount > 0
     }
 
     var shouldRouteRedoToStore: Bool {
-        pendingStructuralRedoCount > 0
+        if let shouldRouteStructuralRedoToStore {
+            return shouldRouteStructuralRedoToStore()
+        }
+        return pendingStructuralRedoCount > 0
     }
 
     func consumeStructuralUndoRoute() {
+        if shouldRouteStructuralUndoToStore != nil {
+            return
+        }
         pendingStructuralUndoCount = max(0, pendingStructuralUndoCount - 1)
         pendingStructuralRedoCount += 1
     }
 
     func consumeStructuralRedoRoute() {
+        if shouldRouteStructuralRedoToStore != nil {
+            return
+        }
         pendingStructuralRedoCount = max(0, pendingStructuralRedoCount - 1)
         pendingStructuralUndoCount += 1
     }

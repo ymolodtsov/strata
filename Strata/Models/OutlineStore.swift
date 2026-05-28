@@ -73,10 +73,19 @@ class OutlineStore {
     private var undoStack: [UndoSnapshot] = []
     private var redoStack: [UndoSnapshot] = []
     private var treeModifiedSinceLastSnapshot = true
+    private var pendingStructuralUndoRouteCount = 0
+    private var pendingStructuralRedoRouteCount = 0
     private static let maxUndoLevels = 50
 
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
+    var shouldRouteStructuralUndoToStore: Bool { pendingStructuralUndoRouteCount > 0 }
+    var shouldRouteStructuralRedoToStore: Bool { pendingStructuralRedoRouteCount > 0 }
+
+    func markStructuralEditForUndoRoute() {
+        pendingStructuralUndoRouteCount += 1
+        pendingStructuralRedoRouteCount = 0
+    }
 
     /// Always saves a snapshot (call before structural operations)
     func saveUndoState() {
@@ -96,11 +105,16 @@ class OutlineStore {
             undoStack.removeFirst()
         }
         redoStack.removeAll()
+        pendingStructuralRedoRouteCount = 0
         treeModifiedSinceLastSnapshot = false
     }
 
     func undo() {
         guard let snap = undoStack.popLast() else { return }
+        if pendingStructuralUndoRouteCount > 0 {
+            pendingStructuralUndoRouteCount -= 1
+            pendingStructuralRedoRouteCount += 1
+        }
         let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath)
         redoStack.append(current)
         restoreSnapshot(snap)
@@ -108,6 +122,10 @@ class OutlineStore {
 
     func redo() {
         guard let snap = redoStack.popLast() else { return }
+        if pendingStructuralRedoRouteCount > 0 {
+            pendingStructuralRedoRouteCount -= 1
+            pendingStructuralUndoRouteCount += 1
+        }
         let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath)
         undoStack.append(current)
         restoreSnapshot(snap)

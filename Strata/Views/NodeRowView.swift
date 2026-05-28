@@ -167,6 +167,9 @@ struct NodeRowView: View {
                     onPasteNodes: { store.pasteNodes(after: node.id) },
                     onUndo: { store.undo() },
                     onRedo: { store.redo() },
+                    onStructuralEditForUndo: { store.markStructuralEditForUndoRoute() },
+                    shouldRouteStructuralUndoToStore: { store.shouldRouteStructuralUndoToStore },
+                    shouldRouteStructuralRedoToStore: { store.shouldRouteStructuralRedoToStore },
                     searchQuery: searchQuery
                 )
                 .allowsHitTesting(!hasSelection)
