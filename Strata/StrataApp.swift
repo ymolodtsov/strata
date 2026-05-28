@@ -103,7 +103,6 @@ enum WindowTabCoordinator {
         configureTabbingMode(window)
         configureTabBarVisibility(window)
         configureChrome(window)
-        configureScrollViews(in: window)
     }
 
     private static func configureTabbingMode(_ window: NSWindow) {
@@ -132,6 +131,8 @@ enum WindowTabCoordinator {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.titlebarSeparatorStyle = .none
+        window.isOpaque = true
+        window.backgroundColor = .textBackgroundColor
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
@@ -141,25 +142,6 @@ enum WindowTabCoordinator {
             scheduleScrollEdgeSuppression(in: window)
         } else {
             applyScrollEdgeSuppression(in: window, refreshTargets: false)
-        }
-    }
-
-    private static func configureScrollViews(in window: NSWindow) {
-        guard let frameView = window.contentView?.superview else { return }
-        configureScrollViews(in: frameView)
-    }
-
-    private static func configureScrollViews(in view: NSView) {
-        if let scrollView = view as? NSScrollView {
-            scrollView.automaticallyAdjustsContentInsets = false
-            scrollView.contentInsets = NSEdgeInsetsZero
-            scrollView.scrollerInsets = NSEdgeInsetsZero
-            scrollView.contentView.automaticallyAdjustsContentInsets = false
-            scrollView.contentView.contentInsets = NSEdgeInsetsZero
-        }
-
-        for subview in view.subviews {
-            configureScrollViews(in: subview)
         }
     }
 
@@ -179,18 +161,7 @@ enum WindowTabCoordinator {
 
     private static func applyScrollEdgeSuppression(in window: NSWindow, refreshTargets: Bool) {
         window.titlebarSeparatorStyle = .none
-
-        let windowId = ObjectIdentifier(window)
-        let needsRefresh = refreshTargets || suppressionStates[windowId]?.targets.isEmpty != false
-        if needsRefresh {
-            configureScrollViews(in: window)
-            refreshSuppressionTargets(in: window)
-        }
-
-        hideCachedSuppressionTargets(for: window)
-        if !refreshTargets {
-            scheduleSuppressionTargetRefreshIfNeeded(in: window)
-        }
+        suppressionStates.removeValue(forKey: ObjectIdentifier(window))
     }
 
     private static func refreshSuppressionTargets(in window: NSWindow) {

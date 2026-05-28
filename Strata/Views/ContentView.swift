@@ -79,7 +79,6 @@ struct ContentView: View {
                     .padding(.horizontal, 28)
                 }
                 .scrollEdgeEffectStyle(nil, for: .top)
-                .background(ScrollEdgeSuppressor())
                 .onChange(of: store.pendingFocusId) { _, newId in
                     if let id = newId {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -319,12 +318,6 @@ private final class ScrollEdgeSuppressorNSView: NSView {
     func suppressOwningScrollView(forceRefresh: Bool = false) {
         guard let scrollView = cachedScrollView ?? nearestScrollView() else { return }
         cachedScrollView = scrollView
-
-        scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets = NSEdgeInsetsZero
-        scrollView.scrollerInsets = NSEdgeInsetsZero
-        scrollView.contentView.automaticallyAdjustsContentInsets = false
-        scrollView.contentView.contentInsets = NSEdgeInsetsZero
 
         let now = ProcessInfo.processInfo.systemUptime
         if forceRefresh || cachedTargets.isEmpty || now - lastTargetRefreshTime > targetRefreshInterval {
