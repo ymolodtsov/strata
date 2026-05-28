@@ -18,6 +18,7 @@ enum WindowTabCoordinator {
         guard let window else { return }
         window.tabbingMode = .preferred
         configureChrome(window)
+        hideAutomaticTabAddButton(in: window)
 
         guard let parent = requestedParentWindow,
               parent != window,
@@ -35,6 +36,8 @@ enum WindowTabCoordinator {
             requestedParentWindow = nil
         }
         window.makeKeyAndOrderFront(nil)
+        hideAutomaticTabAddButton(in: parent)
+        hideAutomaticTabAddButton(in: window)
     }
 
     private static func configureChrome(_ window: NSWindow) {
@@ -48,6 +51,66 @@ enum WindowTabCoordinator {
             toolbar.delegate = EmptyToolbarDelegate.shared
             window.toolbar = toolbar
         }
+    }
+
+    private static func hideAutomaticTabAddButton(in window: NSWindow) {
+        let delays: [TimeInterval] = [0, 0.05, 0.2]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard let frameView = window.contentView?.superview else { return }
+                let standardButtons = Set([
+                    window.standardWindowButton(.closeButton),
+                    window.standardWindowButton(.miniaturizeButton),
+                    window.standardWindowButton(.zoomButton)
+                ].compactMap { $0 })
+
+                for button in frameView.allSubviews.compactMap({ $0 as? NSButton }) {
+                    guard !standardButtons.contains(button),
+                          button.isAutomaticTabAddButton else { continue }
+                    button.isHidden = true
+                    button.isEnabled = false
+                }
+            }
+        }
+    }
+}
+
+private extension NSView {
+    var allSubviews: [NSView] {
+        subviews + subviews.flatMap(\.allSubviews)
+    }
+}
+
+private extension NSButton {
+    var isAutomaticTabAddButton: Bool {
+        let text = [
+            title,
+            alternateTitle,
+            toolTip,
+            accessibilityLabel(),
+            accessibilityHelp(),
+            accessibilityTitle()
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
+        .lowercased()
+
+        if text.contains("new tab") || text.contains("add tab") {
+            return true
+        }
+
+        let imageName = [image?.name(), alternateImage?.name()]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+
+        let looksLikePlus = title.trimmingCharacters(in: .whitespacesAndNewlines) == "+" ||
+            text.trimmingCharacters(in: .whitespacesAndNewlines) == "+" ||
+            imageName.contains("plus") ||
+            imageName.contains("add")
+
+        guard looksLikePlus else { return false }
+        return frame.width >= 20 && frame.width <= 44 && frame.height >= 20 && frame.height <= 44
     }
 }
 
