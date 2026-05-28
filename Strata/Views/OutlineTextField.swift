@@ -207,8 +207,15 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledFormatting = currentFormatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
+            tf.invalidateIntrinsicContentSize()
         } else {
             // Not editing — build styled attributed string directly
+            let shouldInvalidateSize =
+                tf.lastStyledText != currentText ||
+                tf.lastStyledFormatting != currentFormatting ||
+                tf.lastStyledDone != isDone ||
+                tf.lastStyledSearch != searchQ
+
             let styled: NSAttributedString
             if isDone {
                 styled = Self.styledAttributedString(
@@ -235,9 +242,13 @@ struct OutlineTextField: NSViewRepresentable {
                 tf.attributedStringValue = styled
             }
 
-            // Clear style cache when not editing so next edit session restyles
-            tf.lastStyledText = nil
-            tf.lastStyledFormatting = nil
+            tf.lastStyledText = currentText
+            tf.lastStyledFormatting = currentFormatting
+            tf.lastStyledDone = isDone
+            tf.lastStyledSearch = searchQ
+            if shouldInvalidateSize {
+                tf.invalidateIntrinsicContentSize()
+            }
         }
     }
 
@@ -526,6 +537,7 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledFormatting = parent.formatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
+            tf.invalidateIntrinsicContentSize()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -739,14 +751,14 @@ class StrataTextField: NSTextField {
 
     func measuredTextHeight(for width: CGFloat) -> CGFloat {
         let measurementWidth = max(width, 1)
-        let attributed: NSAttributedString
+        let attributed: NSMutableAttributedString
 
         if let editor = currentEditor() as? NSTextView, let storage = editor.textStorage {
-            attributed = storage
+            attributed = NSMutableAttributedString(attributedString: storage)
         } else if attributedStringValue.length > 0 {
-            attributed = attributedStringValue
+            attributed = NSMutableAttributedString(attributedString: attributedStringValue)
         } else {
-            attributed = NSAttributedString(
+            attributed = NSMutableAttributedString(
                 string: stringValue.isEmpty ? " " : stringValue,
                 attributes: [
                     .font: font ?? OutlineTextField.font,
@@ -755,12 +767,37 @@ class StrataTextField: NSTextField {
             )
         }
 
-        let rect = attributed.boundingRect(
-            with: NSSize(width: measurementWidth, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        )
+        if attributed.length > 0 {
+            attributed.addAttribute(
+                .paragraphStyle,
+                value: OutlineTextField.paragraphStyle,
+                range: NSRange(location: 0, length: attributed.length)
+            )
+        } else {
+            attributed.append(NSAttributedString(
+                string: " ",
+                attributes: [
+                    .font: font ?? OutlineTextField.font,
+                    .paragraphStyle: OutlineTextField.paragraphStyle
+                ]
+            ))
+        }
 
-        return max(ceil(rect.height) + 4, 24)
+        let storage = NSTextStorage(attributedString: attributed)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: measurementWidth, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.lineFragmentPadding = 0
+        textContainer.widthTracksTextView = false
+        textContainer.heightTracksTextView = false
+
+        layoutManager.addTextContainer(textContainer)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let rect = layoutManager.usedRect(for: textContainer)
+        return max(ceil(rect.height) + 8, 24)
     }
 
     override func layout() {
