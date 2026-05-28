@@ -1658,6 +1658,29 @@ class OutlineStore {
         pendingFocusId = root.children.first?.id
     }
 
+    @discardableResult
+    func loadBundledWelcomeDocument() -> Bool {
+        guard let url = Bundle.main.url(forResource: "Strata-Welcome", withExtension: "opml"),
+              let data = try? Data(contentsOf: url),
+              let newRoot = try? OPMLService.parse(data: data) else { return false }
+
+        save()
+        root = newRoot
+        ensureEditableRoot()
+        currentFilePath = nil
+        untitledDisplayName = "Welcome to Strata.opml"
+        zoomPath = []
+        undoStack.removeAll()
+        redoStack.removeAll()
+        selectedNodeIds.removeAll()
+        draggedNodeIds.removeAll()
+        dropTargetId = nil
+        dropAsChild = false
+        treeModifiedSinceLastSnapshot = true
+        pendingFocusId = root.children.first?.id
+        return true
+    }
+
     // MARK: - Export
 
     func exportAs(format: String) {

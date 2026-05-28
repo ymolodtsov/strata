@@ -129,6 +129,8 @@ enum WindowTabCoordinator {
     private static func configureChrome(_ window: NSWindow) {
         window.isRestorable = false
         window.restorationClass = nil
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
         window.titlebarSeparatorStyle = .none
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
@@ -299,6 +301,7 @@ enum WindowTabCoordinator {
 
 enum SessionState {
     private static let key = "openDocumentPaths"
+    private static let didShowWelcomeDocumentKey = "didShowWelcomeDocument"
     static let openURLsNotification = Notification.Name("StrataOpenURLsNotification")
 
     struct PendingUntitledCopy {
@@ -356,6 +359,14 @@ enum SessionState {
             let url = URL(fileURLWithPath: path)
             return FileManager.default.fileExists(atPath: path) ? url : nil
         }
+    }
+
+    static var shouldShowWelcomeDocument: Bool {
+        !UserDefaults.standard.bool(forKey: didShowWelcomeDocumentKey)
+    }
+
+    static func markWelcomeDocumentShown() {
+        UserDefaults.standard.set(true, forKey: didShowWelcomeDocumentKey)
     }
 
     private static func orderedOpenDocumentURLs() -> [URL] {
@@ -610,6 +621,13 @@ struct DocumentWindowView: View {
                     openWindow(id: "main")
                 }
             }
+            return
+        }
+
+        if SessionState.shouldShowWelcomeDocument, store.loadBundledWelcomeDocument() {
+            SessionState.markWelcomeDocumentShown()
+            let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
+            window?.makeKeyAndOrderFront(nil)
             return
         }
 

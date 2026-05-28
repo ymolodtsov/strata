@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Welcome to Strata</title>
+  </head>
+  <body>
+    <outline text="Welcome to Strata">
+      <outline text="Strata is a native macOS outliner for writing, thinking, and restructuring ideas quickly.">
+        <outline text="Use it like a document, not a web app: open OPML files, keep multiple documents in tabs, and rely on standard Mac shortcuts."/>
+        <outline text="This starter outline is also a small demo of the features Strata is expected to support well."/>
+      </outline>
+      <outline text="Basic editing">
+        <outline text="Press Return to create a new node."/>
+        <outline text="Press Tab to indent the current node under the previous one."/>
+        <outline text="Press Shift-Tab to outdent it back to the right place in the hierarchy."/>
+        <outline text="Press Cmd-Up or Cmd-Down to move the current node higher or lower."/>
+        <outline text="Click the bullet to focus on a node and work inside that branch."/>
+      </outline>
+      <outline text="Selecting nodes">
+        <outline text="Escape enters node-selection mode for the current row."/>
+        <outline text="Shift-Up and Shift-Down extend the selection from the keyboard."/>
+        <outline text="Click a bullet to select a node, Shift-click to select a range, and Command-click to toggle individual nodes."/>
+        <outline text="Selected nodes can be copied, cut, deleted, completed, merged, or dragged together."/>
+      </outline>
+      <outline text="Drag and drop">
+        <outline text="Drag one selected node to move it."/>
+        <outline text="Select multiple nodes first, then drag any selected row to move the group."/>
+        <outline text="Dropping near another row should clearly show whether the move inserts before, after, or as a child."/>
+      </outline>
+      <outline text="Formatting">
+        <outline text="Use Cmd-B for bold, Cmd-I for italic, and Cmd-L for highlight."/>
+        <outline text="Type **bold**, *italic*, or ==highlight== and Strata should convert the markers into rich text formatting."/>
+        <outline text="Use Cmd-K to add, edit, or remove a URL link on selected text."/>
+        <outline text="Formatting should stay visible while editing; it should not jump or disappear when the cursor enters a node."/>
+      </outline>
+      <outline text="Documents and tabs">
+        <outline text="Cmd-T opens a new tab."/>
+        <outline text="Cmd-W closes the current tab."/>
+        <outline text="File-backed tabs should be remembered when Strata quits and restored on the next launch."/>
+        <outline text="Unsaved non-empty untitled tabs should ask whether to save before closing."/>
+      </outline>
+      <outline text="Views and organization">
+        <outline text="Use search to filter the outline."/>
+        <outline text="Use Hide Completed Items from the View menu when completed work should disappear from the outline."/>
+        <outline text="Breadcrumbs at the bottom show where you are when focused inside a branch."/>
+      </outline>
+      <outline text="Try this small outline">
+        <outline text="Project">
+          <outline text="Research">
+            <outline text="Collect sources"/>
+            <outline text="Summarize useful points"/>
+          </outline>
+          <outline text="Draft">
+            <outline text="Write first pass"/>
+            <outline text="Clean up structure"/>
+          </outline>
+          <outline text="Ship">
+            <outline text="Review"/>
+            <outline text="Export"/>
+          </outline>
+        </outline>
+        <outline text="Try selecting Research and Draft together, then drag them under Ship or copy them to another place."/>
+      </outline>
+    </outline>
+  </body>
+</opml>

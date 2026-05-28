@@ -17,6 +17,7 @@
 		A10008 /* BreadcrumbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10008; };
 		A10009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10009; };
 		A10010 /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012; };
+		A10011 /* Strata-Welcome.opml in Resources */ = {isa = PBXBuildFile; fileRef = B10013; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		B10010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10011 /* Strata.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Strata.entitlements; sourceTree = "<group>"; };
 		B10012 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
+		B10013 /* Strata-Welcome.opml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = "Strata-Welcome.opml"; sourceTree = "<group>"; };
 		B10020 /* Strata.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Strata.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -109,6 +111,7 @@
 				B10009 /* Assets.xcassets */,
 				B10010 /* Info.plist */,
 				B10011 /* Strata.entitlements */,
+				B10013 /* Strata-Welcome.opml */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -167,6 +170,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10009 /* Assets.xcassets in Resources */,
+				A10011 /* Strata-Welcome.opml in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

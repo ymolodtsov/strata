@@ -20,6 +20,7 @@ Strata is a native macOS outliner, closer in spirit to Workflowy than to a gener
 - Tab and Shift-Tab change hierarchy. Shift-Tab must relocate the node to the correct visible position for its new level, matching Workflowy-style outdent behavior rather than merely decrementing an indent number in place.
 - Clicking a node bullet focuses/zooms that node. Clicking/shift-clicking/command-clicking selection affordances should preserve standard Mac selection expectations.
 - The user expects the built `Strata.app` to be copied into the repo root after builds so `/Users/Yury/dev/strata/Strata.app` is the current executable.
+- Fresh installs should show the bundled `Strata-Welcome.opml` demo document on first launch when there are no saved/restored documents.
 
 ## Architecture
 
@@ -29,6 +30,7 @@ Strata is a native macOS outliner, closer in spirit to Workflowy than to a gener
 - `OutlineNode` stores node text, children, completion/collapse state, notes, links/formatting spans, and copy helpers.
 - `OPMLService` parses and serializes OPML and converts legacy Markdown-style formatting markers into formatting spans.
 - `ExportService` handles text/Markdown/HTML export.
+- `Strata/Resources/Strata-Welcome.opml` is the first-launch help/demo document. It is loaded as an untitled document so edits never write back into the app bundle.
 - `ContentView` wires the store to the main window, search bar, scroll view, selection bar, breadcrumbs, and window delegate.
 - `NodeRowView` and `FlatOutline` render the outline rows, hierarchy guide lines, controls, selection background, drag/drop targets, and row-level gestures.
 - `OutlineTextField` bridges to `NSTextField`/field editor for native text editing and rich-text formatting.
