@@ -55,6 +55,7 @@ struct OutlineTextField: NSViewRepresentable {
         tf.lineBreakMode = .byWordWrapping
         tf.cell?.isScrollable = false
         tf.cell?.wraps = true
+        tf.allowsEditingTextAttributes = true
         tf.usesSingleLineMode = false
         tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tf.delegate = context.coordinator
@@ -158,16 +159,6 @@ struct OutlineTextField: NSViewRepresentable {
             // Editing mode — sync text if changed externally (undo/redo)
             var textWasReplaced = false
             if storage.string != currentText {
-                let range = editor.selectedRange
-                editor.undoManager?.disableUndoRegistration()
-                tf.beginProgrammaticStyle()
-                storage.beginEditing()
-                storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: currentText)
-                storage.endEditing()
-                tf.endProgrammaticStyle()
-                editor.undoManager?.enableUndoRegistration()
-                let safeLoc = min(range.location, (currentText as NSString).length)
-                editor.setSelectedRange(NSRange(location: safeLoc, length: 0))
                 textWasReplaced = true
             }
 
@@ -182,30 +173,27 @@ struct OutlineTextField: NSViewRepresentable {
 
             // Restyle text storage attributes
             let savedRange = editor.selectedRange
-            let fullRange = NSRange(location: 0, length: storage.length)
+            let targetText = currentText
 
             editor.undoManager?.disableUndoRegistration()
             tf.beginProgrammaticStyle()
             storage.beginEditing()
-            storage.addAttributes([.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle], range: fullRange)
-            storage.removeAttribute(.link, range: fullRange)
-            storage.removeAttribute(.backgroundColor, range: fullRange)
-            storage.removeAttribute(.underlineStyle, range: fullRange)
-            storage.removeAttribute(Self.formattingAttribute, range: fullRange)
-            if !isDone {
-                Self.applyFormatting(currentFormatting, to: storage, baseFont: font)
-            }
-            Self.applyDetectedLinks(to: storage)
-            if !searchQ.isEmpty {
-                Self.applySearchHighlight(to: storage, query: searchQ)
-            }
+            Self.setStyledText(
+                targetText,
+                in: storage,
+                formatting: currentFormatting,
+                isDone: isDone,
+                baseFont: font,
+                baseColor: baseColor,
+                searchQuery: searchQ
+            )
             storage.endEditing()
             tf.endProgrammaticStyle()
             editor.undoManager?.enableUndoRegistration()
 
-            if savedRange.location + savedRange.length <= storage.length {
-                editor.setSelectedRange(savedRange)
-            }
+            let safeLocation = min(savedRange.location, storage.length)
+            let safeLength = min(savedRange.length, storage.length - safeLocation)
+            editor.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
 
             editor.typingAttributes = Self.typingAttributes(
                 in: storage,
@@ -222,16 +210,19 @@ struct OutlineTextField: NSViewRepresentable {
             // Not editing — build styled attributed string directly
             let styled: NSAttributedString
             if isDone {
-                let doneText = NSMutableAttributedString(
-                    string: currentText,
-                    attributes: [.font: font, .foregroundColor: baseColor, .paragraphStyle: Self.paragraphStyle]
+                styled = Self.styledAttributedString(
+                    from: currentText,
+                    baseFont: font,
+                    baseColor: baseColor,
+                    formatting: [],
+                    isDone: true
                 )
-                Self.applyDetectedLinks(to: doneText)
-                styled = doneText
             } else {
                 styled = Self.styledAttributedString(
                     from: currentText, baseFont: font,
-                    baseColor: baseColor, formatting: currentFormatting
+                    baseColor: baseColor,
+                    formatting: currentFormatting,
+                    isDone: false
                 )
             }
 
@@ -255,15 +246,40 @@ struct OutlineTextField: NSViewRepresentable {
         from text: String,
         baseFont: NSFont,
         baseColor: NSColor,
-        formatting: [TextFormattingSpan]
+        formatting: [TextFormattingSpan],
+        isDone: Bool = false
     ) -> NSAttributedString {
         let attributed = NSMutableAttributedString(
             string: text,
             attributes: [.font: baseFont, .foregroundColor: baseColor, .paragraphStyle: paragraphStyle]
         )
-        applyFormatting(formatting, to: attributed, baseFont: baseFont)
+        if !isDone {
+            applyFormatting(formatting, to: attributed, baseFont: baseFont)
+        }
         applyDetectedLinks(to: attributed)
         return attributed
+    }
+
+    static func setStyledText(
+        _ text: String,
+        in storage: NSTextStorage,
+        formatting: [TextFormattingSpan],
+        isDone: Bool,
+        baseFont: NSFont,
+        baseColor: NSColor,
+        searchQuery: String
+    ) {
+        let attributed = NSMutableAttributedString(attributedString: styledAttributedString(
+            from: text,
+            baseFont: baseFont,
+            baseColor: baseColor,
+            formatting: formatting,
+            isDone: isDone
+        ))
+        if !searchQuery.isEmpty {
+            applySearchHighlight(to: attributed, query: searchQuery)
+        }
+        storage.setAttributedString(attributed)
     }
 
     static func applyFormatting(
@@ -454,38 +470,31 @@ struct OutlineTextField: NSViewRepresentable {
                   let storage = editor.textStorage else { return }
 
             let savedRange = editor.selectedRange
-            let fullRange = NSRange(location: 0, length: storage.length)
             let font = OutlineTextField.font
             let isDone = parent.isDone
             let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
             let searchQ = parent.searchQuery
+            let currentText = storage.string
 
             editor.undoManager?.disableUndoRegistration()
             tf.beginProgrammaticStyle()
             storage.beginEditing()
-            storage.addAttributes([
-                .font: font,
-                .foregroundColor: baseColor,
-                .paragraphStyle: OutlineTextField.paragraphStyle
-            ], range: fullRange)
-            storage.removeAttribute(.link, range: fullRange)
-            storage.removeAttribute(.backgroundColor, range: fullRange)
-            storage.removeAttribute(.underlineStyle, range: fullRange)
-            storage.removeAttribute(OutlineTextField.formattingAttribute, range: fullRange)
-            if !isDone {
-                OutlineTextField.applyFormatting(parent.formatting, to: storage, baseFont: font)
-            }
-            OutlineTextField.applyDetectedLinks(to: storage)
-            if !searchQ.isEmpty {
-                OutlineTextField.applySearchHighlight(to: storage, query: searchQ)
-            }
+            OutlineTextField.setStyledText(
+                currentText,
+                in: storage,
+                formatting: parent.formatting,
+                isDone: isDone,
+                baseFont: font,
+                baseColor: baseColor,
+                searchQuery: searchQ
+            )
             storage.endEditing()
             tf.endProgrammaticStyle()
             editor.undoManager?.enableUndoRegistration()
 
-            if savedRange.location + savedRange.length <= storage.length {
-                editor.setSelectedRange(savedRange)
-            }
+            let safeLocation = min(savedRange.location, storage.length)
+            let safeLength = min(savedRange.length, storage.length - safeLocation)
+            editor.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
 
             editor.typingAttributes = OutlineTextField.typingAttributes(
                 in: storage,
