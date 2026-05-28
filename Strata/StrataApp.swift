@@ -5,7 +5,6 @@ import SwiftUI
 enum WindowTabCoordinator {
     private static weak var requestedParentWindow: NSWindow?
     private static var pendingTabCount = 0
-    private static let toolbarIdentifier = NSToolbar.Identifier("family.ma.strata.window-toolbar")
 
     static func requestNextWindowAsTab() {
         if requestedParentWindow == nil {
@@ -60,12 +59,6 @@ enum WindowTabCoordinator {
     private static func configureChrome(_ window: NSWindow) {
         window.isRestorable = false
         window.restorationClass = nil
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
-        window.toolbarStyle = .automatic
-        if window.toolbar?.identifier == toolbarIdentifier {
-            window.toolbar = nil
-        }
     }
 }
 
@@ -444,7 +437,6 @@ struct StrataApp: App {
         WindowGroup(id: "main") {
             DocumentWindowView()
         }
-        .windowStyle(.titleBar)
         .defaultSize(width: 720, height: 640)
         .commands {
             // MARK: Undo / Redo

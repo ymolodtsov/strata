@@ -100,7 +100,6 @@ struct ContentView: View {
                 BreadcrumbView(store: store)
             }
         }
-        .navigationTitle(store.documentTitle)
         .background(Color(.textBackgroundColor))
         .background(WindowConfigurator(store: store, url: store.currentFilePath) { window in
             if hostingWindow != window {
