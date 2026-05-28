@@ -1218,7 +1218,17 @@ class OutlineStore {
               let parentIndex = grandparent.indexOfChild(parent.id),
               let nodeIndex = parent.indexOfChild(nodeId) else { return false }
 
-        parent.children.remove(at: nodeIndex)
+        let followingSiblings = Array(parent.children.dropFirst(nodeIndex + 1))
+        parent.children.removeSubrange(nodeIndex..<parent.children.count)
+
+        if !followingSiblings.isEmpty {
+            for sibling in followingSiblings {
+                sibling.parent = node
+                node.children.append(sibling)
+            }
+            node.isExpanded = true
+        }
+
         node.parent = grandparent
         grandparent.children.insert(node, at: parentIndex + 1)
         return true
