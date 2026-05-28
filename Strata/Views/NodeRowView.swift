@@ -10,6 +10,7 @@ struct NodeRowView: View {
     let isDragging: Bool
     let isDropTarget: Bool
     let dropAbove: Bool
+    let dropAsChild: Bool
     let hasSelection: Bool
     let shouldFocus: Bool
     let cursorPosition: Int?
@@ -208,15 +209,15 @@ struct NodeRowView: View {
             }
         )
         .opacity(isDragging ? 0.12 : 1.0)
-        .overlay(alignment: dropAbove ? .top : .bottom) {
+        .overlay(alignment: dropAbove && !dropAsChild ? .top : .bottom) {
             if isDropTarget && !isDragging {
                 Rectangle()
                     .fill(Color.accentColor)
                     .frame(height: 2)
-                    .padding(.leading, CGFloat(depth) * 24 + 22)
+                    .padding(.leading, dropIndicatorLeadingPadding)
             }
         }
-        .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, store: store))
+        .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, depth: depth, store: store))
         .onHover { isHovered = $0 }
         .contentShape(Rectangle())
         .draggableWhenSelected(isSelected, provider: {
@@ -253,6 +254,11 @@ struct NodeRowView: View {
         store.beginDrag(nodeId: node.id)
         let label = dragCount == 1 ? node.text : "\(dragCount) Strata nodes"
         return NSItemProvider(object: NSString(string: label))
+    }
+
+    private var dropIndicatorLeadingPadding: CGFloat {
+        let targetDepth = dropAsChild ? depth + 1 : depth
+        return CGFloat(targetDepth) * 24 + 22
     }
 
     private var dragPreview: some View {
@@ -308,18 +314,19 @@ private extension View {
 
 struct NodeDropDelegate: DropDelegate {
     let nodeId: UUID
+    let depth: Int
     let store: OutlineStore
 
     func dropEntered(info: DropInfo) {
         guard store.canDrop(on: nodeId) else { return }
-        store.updateDropTarget(nodeId, above: info.location.y < 13)
+        updateDropTarget(info: info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         guard store.canDrop(on: nodeId) else {
             return DropProposal(operation: .cancel)
         }
-        store.updateDropTarget(nodeId, above: info.location.y < 13)
+        updateDropTarget(info: info)
         return DropProposal(operation: .move)
     }
 
@@ -329,6 +336,16 @@ struct NodeDropDelegate: DropDelegate {
 
     func dropExited(info: DropInfo) {
         store.clearDropTarget(nodeId)
+    }
+
+    private func updateDropTarget(info: DropInfo) {
+        let above = info.location.y < 13
+        let asChild = !above && info.location.x >= childDropThreshold
+        store.updateDropTarget(nodeId, above: above, asChild: asChild)
+    }
+
+    private var childDropThreshold: CGFloat {
+        CGFloat(depth) * 24 + 122
     }
 }
 
@@ -383,6 +400,7 @@ struct FlatOutline: View {
         let selectedCount = selectedIds.count
         let dropTargetId = store.dropTargetId
         let dropAbove = store.dropAbove
+        let dropAsChild = store.dropAsChild
         let hasSelection = !selectedIds.isEmpty
         let pendingFocusId = store.pendingFocusId
         let pendingCursorPosition = store.pendingCursorPosition
@@ -399,6 +417,7 @@ struct FlatOutline: View {
                     isDragging: draggedIds.contains(item.node.id),
                     isDropTarget: dropTargetId == item.node.id,
                     dropAbove: dropAbove,
+                    dropAsChild: dropAsChild,
                     hasSelection: hasSelection,
                     shouldFocus: pendingFocusId == item.node.id,
                     cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,

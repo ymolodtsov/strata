@@ -137,6 +137,7 @@ class OutlineStore {
         selectedNodeIds.removeAll()
         draggedNodeIds.removeAll()
         dropTargetId = nil
+        dropAsChild = false
         treeModifiedSinceLastSnapshot = false
         pendingFocusId = currentRoot.children.first?.id
         save()
@@ -962,6 +963,7 @@ class OutlineStore {
     var draggedNodeIds: Set<UUID> = []
     var dropTargetId: UUID?
     var dropAbove: Bool = true
+    var dropAsChild: Bool = false
     private var dragCleanupGeneration = 0
 
     func beginDrag(nodeId: UUID) {
@@ -979,6 +981,7 @@ class OutlineStore {
         dragCleanupGeneration += 1
         draggedNodeIds.removeAll()
         dropTargetId = nil
+        dropAsChild = false
     }
 
     private func scheduleDragCleanup(generation: Int) {
@@ -1008,18 +1011,22 @@ class OutlineStore {
         return true
     }
 
-    func updateDropTarget(_ targetId: UUID, above: Bool) {
+    func updateDropTarget(_ targetId: UUID, above: Bool, asChild: Bool = false) {
         if dropTargetId != targetId {
             dropTargetId = targetId
         }
         if dropAbove != above {
             dropAbove = above
         }
+        if dropAsChild != asChild {
+            dropAsChild = asChild
+        }
     }
 
     func clearDropTarget(_ targetId: UUID) {
         if dropTargetId == targetId {
             dropTargetId = nil
+            dropAsChild = false
         }
     }
 
@@ -1062,17 +1069,29 @@ class OutlineStore {
         }
 
         // Re-find target after removals and insert
-        guard let target = root.find(id: targetId),
-              let targetParent = target.parent,
-              let targetIdx = targetParent.indexOfChild(targetId) else {
+        guard let target = root.find(id: targetId) else {
             endDrag()
             return false
         }
 
-        let insertIdx = dropAbove ? targetIdx : targetIdx + 1
-        for (offset, node) in topLevel.enumerated() {
-            node.parent = targetParent
-            targetParent.children.insert(node, at: min(insertIdx + offset, targetParent.children.count))
+        if dropAsChild {
+            target.isExpanded = true
+            for node in topLevel {
+                node.parent = target
+                target.children.append(node)
+            }
+        } else {
+            guard let targetParent = target.parent,
+                  let targetIdx = targetParent.indexOfChild(targetId) else {
+                endDrag()
+                return false
+            }
+
+            let insertIdx = dropAbove ? targetIdx : targetIdx + 1
+            for (offset, node) in topLevel.enumerated() {
+                node.parent = targetParent
+                targetParent.children.insert(node, at: min(insertIdx + offset, targetParent.children.count))
+            }
         }
 
         endDrag()
@@ -1444,6 +1463,7 @@ class OutlineStore {
         selectedNodeIds.removeAll()
         draggedNodeIds.removeAll()
         dropTargetId = nil
+        dropAsChild = false
         treeModifiedSinceLastSnapshot = true
         pendingFocusId = root.children.first?.id
         RecentFiles.shared.add(url)
@@ -1494,6 +1514,7 @@ class OutlineStore {
         selectedNodeIds.removeAll()
         draggedNodeIds.removeAll()
         dropTargetId = nil
+        dropAsChild = false
         treeModifiedSinceLastSnapshot = true
         pendingFocusId = root.children.first?.id
     }
