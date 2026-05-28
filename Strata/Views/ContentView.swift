@@ -87,6 +87,12 @@ struct ContentView: View {
                 }
             }
 
+            if store.hasSelection {
+                Divider()
+                    .opacity(0.5)
+                SelectionBarView(store: store)
+            }
+
             if !store.zoomPath.isEmpty {
                 Divider()
                     .opacity(0.5)
@@ -254,6 +260,72 @@ struct ContentView: View {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
+    }
+}
+
+private struct SelectionBarView: View {
+    @Bindable var store: OutlineStore
+
+    private var selectionLabel: String {
+        store.selectionCount == 1 ? "1 selected" : "\(store.selectionCount) selected"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(selectionLabel)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+
+            selectionButton("doc.on.doc", help: "Copy") {
+                store.copySelectedAsText()
+            }
+            selectionButton("scissors", help: "Cut") {
+                store.cutSelected()
+            }
+            selectionButton("doc.on.clipboard", help: "Paste After Selection") {
+                store.pasteAfterSelection()
+            }
+
+            Divider()
+                .frame(height: 18)
+
+            selectionButton("arrow.triangle.merge", help: "Merge Selected Nodes") {
+                store.mergeSelected()
+            }
+            .disabled(!store.canMergeSelection)
+
+            selectionButton("checkmark.circle", help: "Toggle Complete") {
+                store.toggleDoneSelected()
+            }
+            selectionButton("trash", help: "Delete") {
+                store.deleteSelected()
+            }
+            selectionButton("xmark", help: "Clear Selection") {
+                store.clearSelection()
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 8)
+        .background(Color(.textBackgroundColor))
+    }
+
+    private func selectionButton(
+        _ systemName: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(help)
     }
 }
 

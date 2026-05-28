@@ -168,6 +168,9 @@ struct NodeRowView: View {
                         .onTapGesture {
                             handleTextAreaClick()
                         }
+                        .onDrag {
+                            dragProvider()
+                        }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

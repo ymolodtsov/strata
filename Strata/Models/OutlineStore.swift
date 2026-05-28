@@ -164,6 +164,10 @@ class OutlineStore {
     }
 
     var hasSelection: Bool { !selectedNodeIds.isEmpty }
+    var selectionCount: Int { selectedNodeIds.count }
+    var canMergeSelection: Bool {
+        selectedSiblingBlocks().contains { $0.nodes.count > 1 }
+    }
 
     // MARK: - Zoom
 
@@ -388,17 +392,19 @@ class OutlineStore {
     }
 
     func toggleSelection(nodeId: UUID) {
+        let hadSelection = !selectedNodeIds.isEmpty
         if selectedNodeIds.contains(nodeId) {
             selectedNodeIds.remove(nodeId)
             if selectedNodeIds.isEmpty {
                 clearSelection()
             } else {
-                selectionAnchorId = firstSelectedVisibleNodeId()
-                selectionCursorId = nodeId
+                updateSelectionAnchorsFromVisibleSelection()
             }
         } else {
             selectedNodeIds.insert(nodeId)
-            selectionAnchorId = nodeId
+            if !hadSelection {
+                selectionAnchorId = nodeId
+            }
             selectionCursorId = nodeId
         }
         NSApp.keyWindow?.makeFirstResponder(nil)
@@ -417,6 +423,14 @@ class OutlineStore {
 
     private func firstSelectedVisibleNodeId() -> UUID? {
         visibleNodes().first(where: { selectedNodeIds.contains($0.node.id) })?.node.id
+    }
+
+    private func updateSelectionAnchorsFromVisibleSelection() {
+        let selectedVisibleIds = visibleNodes()
+            .map(\.node.id)
+            .filter { selectedNodeIds.contains($0) }
+        selectionAnchorId = selectedVisibleIds.first
+        selectionCursorId = selectedVisibleIds.last
     }
 
     /// Start block selection from a text field by pressing Shift+Up
