@@ -15,13 +15,7 @@ enum WindowTabCoordinator {
 
     static func openNextWindowAsTab(using openWindow: OpenWindowAction) {
         requestNextWindowAsTab()
-        guard let parent = requestedParentWindow, parent.isVisible else {
-            openWindow(id: "main")
-            return
-        }
-
-        parent.tabbingMode = .preferred
-        parent.newWindowForTab(nil)
+        openWindow(id: "main")
     }
 
     static func configure(_ window: NSWindow?) {
@@ -395,9 +389,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var closeObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Let AppKit own the native tab strip; Strata only provides the document
-        // content for each tab.
-        NSWindow.allowsAutomaticWindowTabbing = true
+        // Keep tab creation under Strata's Cmd-T/menu flow until the app moves to
+        // DocumentGroup/NSDocument.
+        NSWindow.allowsAutomaticWindowTabbing = false
 
         // Save session state when the app loses focus (covers force-quit scenarios)
         resignObserver = NotificationCenter.default.addObserver(
