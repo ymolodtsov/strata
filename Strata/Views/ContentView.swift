@@ -71,7 +71,7 @@ struct ContentView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         FlatOutline(store: store)
                     }
                     .padding(.top, store.zoomPath.isEmpty ? 16 : 8)
