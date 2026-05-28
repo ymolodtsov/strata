@@ -33,6 +33,11 @@ enum WindowTabCoordinator {
 
 enum SessionState {
     private static let key = "openDocumentPaths"
+    struct PendingUntitledCopy {
+        let root: OutlineNode
+        let displayName: String
+    }
+
     private final class WindowStoreRef {
         weak var window: NSWindow?
         weak var store: OutlineStore?
@@ -47,6 +52,7 @@ enum SessionState {
 
     /// URLs waiting to be loaded by newly created windows during restoration.
     static var pendingRestoreURLs: [URL] = []
+    static var pendingUntitledCopies: [PendingUntitledCopy] = []
 
     static func associate(store: OutlineStore, with window: NSWindow) {
         cleanupWindowStores()
@@ -245,6 +251,9 @@ struct DocumentWindowView: View {
                     DispatchQueue.main.async {
                         restoreSession()
                     }
+                } else if let copy = SessionState.pendingUntitledCopies.first {
+                    SessionState.pendingUntitledCopies.removeFirst()
+                    store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
                 } else if let url = SessionState.pendingRestoreURLs.first {
                     // This window was created during session restoration — load its file
                     SessionState.pendingRestoreURLs.removeFirst()
@@ -431,7 +440,7 @@ struct StrataApp: App {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
 
-                Button("Duplicate...") {
+                Button("Duplicate") {
                     duplicateActiveDocument()
                 }
 
@@ -603,8 +612,15 @@ struct StrataApp: App {
     }
 
     private func duplicateActiveDocument() {
-        guard let duplicateURL = activeStore?.duplicate() else { return }
-        openURLAsTab(duplicateURL)
+        guard let store = activeStore,
+              let openWindow = openWindowAction else { return }
+
+        let duplicate = store.duplicateTemplate()
+        SessionState.pendingUntitledCopies.append(
+            SessionState.PendingUntitledCopy(root: duplicate.root, displayName: duplicate.displayName)
+        )
+        WindowTabCoordinator.requestNextWindowAsTab()
+        openWindow(id: "main")
     }
 
     private func activeFieldEditor() -> NSTextView? {

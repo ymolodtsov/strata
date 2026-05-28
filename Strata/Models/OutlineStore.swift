@@ -55,6 +55,7 @@ class OutlineStore {
     var pendingFocusId: UUID?
     var pendingCursorPosition: Int?
     var currentFilePath: URL?
+    var untitledDisplayName: String?
     var selectedNodeIds: Set<UUID> = []
 
     private var saveWorkItem: DispatchWorkItem?
@@ -123,7 +124,7 @@ class OutlineStore {
     }
 
     var documentTitle: String {
-        guard let url = currentFilePath else { return "Untitled" }
+        guard let url = currentFilePath else { return untitledDisplayName ?? "Untitled" }
         if url == Self.defaultFileURL { return "Strata" }
         return url.lastPathComponent
     }
@@ -1306,6 +1307,7 @@ class OutlineStore {
 
     func save(to url: URL) {
         currentFilePath = url
+        untitledDisplayName = nil
         let data = OPMLService.serialize(root: root)
         try? data.write(to: url)
         RecentFiles.shared.add(url)
@@ -1332,6 +1334,7 @@ class OutlineStore {
         }
         let store = OutlineStore(root: root)
         store.currentFilePath = url
+        store.untitledDisplayName = nil
         return store
     }
 
@@ -1357,6 +1360,7 @@ class OutlineStore {
 
         root = newRoot
         currentFilePath = url
+        untitledDisplayName = nil
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
@@ -1373,6 +1377,8 @@ class OutlineStore {
         panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
         if let currentURL = currentFilePath {
             panel.nameFieldStringValue = currentURL.lastPathComponent
+        } else if let untitledDisplayName {
+            panel.nameFieldStringValue = untitledDisplayName
         } else {
             panel.nameFieldStringValue = "outline.opml"
         }
@@ -1382,27 +1388,29 @@ class OutlineStore {
         }
     }
 
-    /// Duplicate the current document to a new file without moving the original.
-    func duplicate() -> URL? {
-        save()
-
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
-
+    func duplicateTemplate() -> (root: OutlineNode, displayName: String) {
         if let currentURL = currentFilePath {
             let baseName = currentURL.deletingPathExtension().lastPathComponent
-            panel.nameFieldStringValue = "\(baseName) copy.opml"
-        } else {
-            panel.nameFieldStringValue = "outline copy.opml"
+            return (root.deepCopy(), "\(baseName) copy.opml")
         }
 
-        if panel.runModal() == .OK, let url = panel.url {
-            let data = OPMLService.serialize(root: root)
-            try? data.write(to: url)
-            RecentFiles.shared.add(url)
-            return url
-        }
-        return nil
+        let baseName = untitledDisplayName.map { ($0 as NSString).deletingPathExtension } ?? "outline"
+        return (root.deepCopy(), "\(baseName) copy.opml")
+    }
+
+    func loadUntitledCopy(root newRoot: OutlineNode, displayName: String) {
+        save()
+        root = newRoot
+        currentFilePath = nil
+        untitledDisplayName = displayName
+        zoomPath = []
+        undoStack.removeAll()
+        redoStack.removeAll()
+        selectedNodeIds.removeAll()
+        draggedNodeIds.removeAll()
+        dropTargetId = nil
+        treeModifiedSinceLastSnapshot = true
+        pendingFocusId = root.children.first?.id
     }
 
     // MARK: - Export
