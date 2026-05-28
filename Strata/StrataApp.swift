@@ -183,26 +183,32 @@ enum SessionState {
             for tabWindow in tabWindows {
                 let id = ObjectIdentifier(tabWindow)
                 guard seenWindows.insert(id).inserted,
+                      tabWindow.isVisible,
                       let store = windowStores[id]?.store,
                       let url = store.currentFilePath else { continue }
                 urls.append(url)
             }
         }
 
-        if !urls.isEmpty { return urls }
-
-        return OutlineStore.openStores.allObjects
-            .compactMap(\.currentFilePath)
+        return urls
     }
 
     private static func cleanupWindowStores() {
         windowStores = windowStores.filter { _, ref in
-            ref.window != nil && ref.store != nil
+            guard let window = ref.window, ref.store != nil else { return false }
+            return window.isVisible
         }
     }
 
     static func forget(window: NSWindow) {
         windowStores.removeValue(forKey: ObjectIdentifier(window))
+    }
+
+    static func forgetAndSave(window: NSWindow) {
+        forget(window: window)
+        DispatchQueue.main.async {
+            saveOpenDocuments()
+        }
     }
 }
 
@@ -415,26 +421,17 @@ struct DocumentWindowView: View {
             return
         }
 
-        // No saved session — fall back to recent files
-        RecentFiles.shared.refresh()
-        let recentURLs = NSDocumentController.shared.recentDocumentURLs
-
-        for url in recentURLs {
-            if FileManager.default.fileExists(atPath: url.path) {
-                store.loadFile(from: url)
-                return
-            }
-        }
-
-        // No recent files — hide the empty window, show open panel
+        // No saved session — hide the placeholder window and show the native open panel.
         let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
         window?.orderOut(nil)
 
         if let url = showLaunchOpenPanel() {
             store.loadFile(from: url)
+            window?.makeKeyAndOrderFront(nil)
+        } else if let window {
+            SessionState.forgetAndSave(window: window)
+            window.close()
         }
-
-        window?.makeKeyAndOrderFront(nil)
     }
 }
 
@@ -442,6 +439,7 @@ struct DocumentWindowView: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignObserver: Any?
+    private var closeObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep tab creation under Strata's Cmd-T/menu flow. AppKit's automatic
@@ -456,10 +454,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             SessionState.saveOpenDocuments()
         }
+
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil, queue: .main
+        ) { notification in
+            guard let window = notification.object as? NSWindow else { return }
+            SessionState.forgetAndSave(window: window)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         SessionState.saveOpenDocuments()
+    }
+
+    deinit {
+        if let resignObserver {
+            NotificationCenter.default.removeObserver(resignObserver)
+        }
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
+        }
     }
 }
 
