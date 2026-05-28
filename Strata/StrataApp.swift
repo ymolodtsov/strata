@@ -625,9 +625,7 @@ struct StrataApp: App {
                     openUntitledTab()
                 }
                 .keyboardShortcut("t")
-            }
 
-            CommandGroup(after: .newItem) {
                 Divider()
 
                 Button("Open...") {
