@@ -54,6 +54,9 @@ enum WindowTabCoordinator {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0
             context.allowsImplicitAnimation = false
+            if parent.tabGroup?.isTabBarVisible == false {
+                parent.toggleTabBar(nil)
+            }
             if let tabGroup = parent.tabGroup {
                 tabGroup.addWindow(window)
                 tabGroup.selectedWindow = window

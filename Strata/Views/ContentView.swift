@@ -79,6 +79,7 @@ struct ContentView: View {
                     .padding(.horizontal, 28)
                 }
                 .scrollEdgeEffectStyle(nil, for: .top)
+                .background(ScrollEdgeSuppressor())
                 .onChange(of: store.pendingFocusId) { _, newId in
                     if let id = newId {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -265,6 +266,77 @@ struct ContentView: View {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
+        }
+    }
+}
+
+private struct ScrollEdgeSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> ScrollEdgeSuppressorNSView {
+        ScrollEdgeSuppressorNSView()
+    }
+
+    func updateNSView(_ nsView: ScrollEdgeSuppressorNSView, context: Context) {
+        nsView.suppressOwningScrollView()
+    }
+}
+
+private final class ScrollEdgeSuppressorNSView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        suppressOwningScrollView()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        suppressOwningScrollView()
+    }
+
+    override func layout() {
+        super.layout()
+        suppressOwningScrollView()
+    }
+
+    override func viewWillDraw() {
+        suppressOwningScrollView()
+        super.viewWillDraw()
+    }
+
+    func suppressOwningScrollView() {
+        guard let scrollView = nearestScrollView() else { return }
+
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
+        scrollView.scrollerInsets = NSEdgeInsetsZero
+        scrollView.contentView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.contentInsets = NSEdgeInsetsZero
+        suppressScrollEdgePocket(in: scrollView, insidePocket: false)
+    }
+
+    private func nearestScrollView() -> NSScrollView? {
+        var candidate = superview
+        while let view = candidate {
+            if let scrollView = view as? NSScrollView {
+                return scrollView
+            }
+            candidate = view.superview
+        }
+        return nil
+    }
+
+    private func suppressScrollEdgePocket(in view: NSView, insidePocket: Bool) {
+        let className = NSStringFromClass(type(of: view))
+        let isPocket = insidePocket || className.contains("NSScrollPocket")
+        let isTopBackdrop = className.contains("BackdropView") &&
+            view.frame.minY == 0 &&
+            view.frame.height <= 80
+
+        if isPocket || isTopBackdrop {
+            view.isHidden = true
+            view.alphaValue = 0
+        }
+
+        for subview in view.subviews {
+            suppressScrollEdgePocket(in: subview, insidePocket: isPocket)
         }
     }
 }
