@@ -344,7 +344,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSWindow.allowsAutomaticWindowTabbing = true
+        // Keep tab creation under Strata's Cmd-T/menu flow. AppKit's automatic
+        // tab affordance draws a native plus button that currently renders poorly
+        // in the macOS 26 titlebar; explicit addTabbedWindow calls still work.
+        NSWindow.allowsAutomaticWindowTabbing = false
 
         // Save session state when the app loses focus (covers force-quit scenarios)
         resignObserver = NotificationCenter.default.addObserver(
