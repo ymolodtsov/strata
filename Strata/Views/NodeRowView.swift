@@ -13,6 +13,8 @@ private enum OutlineLayoutMetrics {
     static let checkboxIconSize: CGFloat = 15
     static let chevronIconSize: CGFloat = 10
     static let bulletSize: CGFloat = 6
+    static let controlTopOffset: CGFloat = -2
+    static let textTopOffset: CGFloat = 1
 
     static func guideX(forDepth depth: Int) -> CGFloat {
         CGFloat(depth) * indentWidth + guideInset
@@ -60,6 +62,7 @@ struct NodeRowView: View {
                 }
             }
             .frame(width: OutlineLayoutMetrics.checkboxWidth, height: OutlineLayoutMetrics.controlHeight)
+            .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
             .onTapGesture {
                 store.toggleDone(nodeId: node.id)
@@ -76,6 +79,7 @@ struct NodeRowView: View {
                 }
             }
             .frame(width: OutlineLayoutMetrics.chevronWidth, height: OutlineLayoutMetrics.controlHeight)
+            .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
             .onTapGesture {
                 if !node.children.isEmpty {
@@ -91,6 +95,7 @@ struct NodeRowView: View {
                     .animation(.easeInOut(duration: 0.15), value: isHovered)
             }
             .frame(width: OutlineLayoutMetrics.bulletWidth, height: OutlineLayoutMetrics.controlHeight)
+            .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
             .onTapGesture {
                 store.zoomIn(nodeId: node.id)
@@ -203,6 +208,7 @@ struct NodeRowView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .offset(y: OutlineLayoutMetrics.textTopOffset)
 
             // Note indicator
             if !node.note.isEmpty {
