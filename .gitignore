@@ -2,6 +2,7 @@
 .claude/
 DerivedData/
 build/
+release/
 *.xcuserdata/
 *.xcuserstate
 *.moved-aside

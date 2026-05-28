@@ -5,61 +5,107 @@
   </head>
   <body>
     <outline text="Welcome to Strata">
-      <outline text="Strata is a native macOS outliner for writing, thinking, and restructuring ideas quickly.">
-        <outline text="Use it like a document, not a web app: open OPML files, keep multiple documents in tabs, and rely on standard Mac shortcuts."/>
-        <outline text="This starter outline is also a small demo of the features Strata is expected to support well."/>
+      <outline text="What Strata is">
+        <outline text="Strata is a native macOS outliner for writing, planning, research notes, project breakdowns, and restructuring ideas quickly."/>
+        <outline text="It is closer to Workflowy than to a notes app: the outline is the primary interface, and every row is a movable node."/>
+        <outline text="Documents are regular OPML files. You can keep several documents open in native macOS tabs, save them anywhere, and reopen them from Finder."/>
+        <outline text="This document is a starter outline and a feature tour. Edit it, duplicate it, or close it when you are done."/>
       </outline>
       <outline text="Basic editing">
-        <outline text="Press Return to create a new node."/>
-        <outline text="Press Tab to indent the current node under the previous one."/>
-        <outline text="Press Shift-Tab to outdent it back to the right place in the hierarchy."/>
-        <outline text="Press Cmd-Up or Cmd-Down to move the current node higher or lower."/>
-        <outline text="Click the bullet to focus on a node and work inside that branch."/>
+        <outline text="Click in a node and type to edit it."/>
+        <outline text="Press Return to split the current node or create a new node after it."/>
+        <outline text="Press Tab to indent the current node under the previous visible node."/>
+        <outline text="Press Shift-Tab to outdent the node to the correct place in the hierarchy."/>
+        <outline text="Press Cmd-Up or Cmd-Down to move the current node higher or lower among its siblings."/>
+        <outline text="Backspace at the start of a node merges it with the previous node."/>
+      </outline>
+      <outline text="Focusing and navigating">
+        <outline text="Click a node bullet to focus on that node and work inside that branch."/>
+        <outline text="Use the breadcrumb bar at the bottom to understand where you are after focusing."/>
+        <outline text="Use Cmd-[ to zoom out, Cmd-] to zoom in, and Cmd-\ to return home."/>
+        <outline text="Collapse or expand branches with the chevron next to a node."/>
+        <outline text="Collapsed state is saved in the OPML file using Strata metadata, so it should be restored when you reopen the document."/>
       </outline>
       <outline text="Selecting nodes">
-        <outline text="Escape enters node-selection mode for the current row."/>
+        <outline text="Press Escape while editing to enter node-selection mode for the current row."/>
+        <outline text="Click a bullet to select a node."/>
+        <outline text="Shift-click to select a range of visible nodes."/>
+        <outline text="Command-click to toggle individual nodes in or out of the selection."/>
         <outline text="Shift-Up and Shift-Down extend the selection from the keyboard."/>
-        <outline text="Click a bullet to select a node, Shift-click to select a range, and Command-click to toggle individual nodes."/>
-        <outline text="Selected nodes can be copied, cut, deleted, completed, merged, or dragged together."/>
+        <outline text="Press Enter to edit the first selected node again."/>
+      </outline>
+      <outline text="Mass actions">
+        <outline text="Selected nodes can be copied, cut, pasted, deleted, completed, merged, or dragged together."/>
+        <outline text="Cmd-C copies selected nodes as an outline."/>
+        <outline text="Cmd-X cuts selected nodes."/>
+        <outline text="Cmd-V pastes copied nodes after the active selection or current node."/>
+        <outline text="Delete removes selected nodes."/>
+        <outline text="Cmd-J merges selected nodes when the selection can be merged."/>
+        <outline text="The selection bar at the bottom exposes copy, cut, paste, merge, complete, delete, and clear-selection actions."/>
       </outline>
       <outline text="Drag and drop">
-        <outline text="Drag one selected node to move it."/>
-        <outline text="Select multiple nodes first, then drag any selected row to move the group."/>
-        <outline text="Dropping near another row should clearly show whether the move inserts before, after, or as a child."/>
+        <outline text="Drag a node bullet to move that node."/>
+        <outline text="Select multiple nodes first, then drag one selected row to move the group."/>
+        <outline text="The drop indicator shows whether the drop inserts before, inserts after, or makes the dragged nodes children of the target."/>
+        <outline text="Dragging should preserve subtrees, so moving a parent also moves its children."/>
+        <outline text="Try dragging the sample Research branch under Ship in the practice outline below."/>
       </outline>
       <outline text="Formatting">
         <outline text="Use Cmd-B for bold, Cmd-I for italic, and Cmd-L for highlight."/>
-        <outline text="Type **bold**, *italic*, or ==highlight== and Strata should convert the markers into rich text formatting."/>
+        <outline text="Type **bold**, *italic*, or ==highlight== and Strata converts the markers into rich text formatting."/>
+        <outline text="The Markdown-like markers are input shortcuts; Strata removes them after applying the rich formatting."/>
         <outline text="Use Cmd-K to add, edit, or remove a URL link on selected text."/>
-        <outline text="Formatting should stay visible while editing; it should not jump or disappear when the cursor enters a node."/>
+        <outline text="Links, bold, italic, and highlight are stored as Strata formatting spans inside the OPML file."/>
+      </outline>
+      <outline text="Completed items">
+        <outline text="Click the circle on the left of a row to mark a node complete."/>
+        <outline text="Completing a parent completes its children too."/>
+        <outline text="Use View &gt; Hide Completed Items to hide finished work without deleting it."/>
+        <outline text="Completed state is saved in the OPML file using Strata metadata."/>
       </outline>
       <outline text="Documents and tabs">
         <outline text="Cmd-T opens a new tab."/>
         <outline text="Cmd-W closes the current tab."/>
-        <outline text="File-backed tabs should be remembered when Strata quits and restored on the next launch."/>
+        <outline text="File &gt; Open opens OPML, Markdown, or plain text outlines."/>
+        <outline text="File &gt; Save and File &gt; Save As use native macOS save panels."/>
+        <outline text="File &gt; Duplicate creates an untitled copy in a new tab."/>
+        <outline text="File-backed tabs are remembered when Strata quits and restored on the next launch."/>
         <outline text="Unsaved non-empty untitled tabs should ask whether to save before closing."/>
       </outline>
-      <outline text="Views and organization">
-        <outline text="Use search to filter the outline."/>
-        <outline text="Use Hide Completed Items from the View menu when completed work should disappear from the outline."/>
-        <outline text="Breadcrumbs at the bottom show where you are when focused inside a branch."/>
+      <outline text="Search and export">
+        <outline text="Use Cmd-F to search inside the current outline."/>
+        <outline text="Search filters the visible outline while preserving the underlying document."/>
+        <outline text="Export as plain text, Markdown, or HTML from File &gt; Export As."/>
       </outline>
-      <outline text="Try this small outline">
+      <outline text="Practice outline">
         <outline text="Project">
           <outline text="Research">
             <outline text="Collect sources"/>
             <outline text="Summarize useful points"/>
+            <outline text="Mark completed sources as done"/>
           </outline>
           <outline text="Draft">
             <outline text="Write first pass"/>
-            <outline text="Clean up structure"/>
+            <outline text="Break long sections into smaller nodes"/>
+            <outline text="Use highlight for claims that need evidence"/>
+          </outline>
+          <outline text="Review">
+            <outline text="Select several weak sections and move them together"/>
+            <outline text="Merge duplicate points"/>
+            <outline text="Add links to references with Cmd-K"/>
           </outline>
           <outline text="Ship">
-            <outline text="Review"/>
             <outline text="Export"/>
+            <outline text="Archive completed tasks"/>
           </outline>
         </outline>
-        <outline text="Try selecting Research and Draft together, then drag them under Ship or copy them to another place."/>
+        <outline text="Try selecting Research and Draft together, then drag them under Review."/>
+        <outline text="Try focusing on Project by clicking its bullet, then zoom back out with Cmd-[."/>
+      </outline>
+      <outline text="Public build notes">
+        <outline text="Strata is currently unsigned because it is not distributed through a paid Apple Developer account."/>
+        <outline text="If macOS Gatekeeper blocks the app, open System Settings &gt; Privacy &amp; Security and allow Strata, or Control-click the app and choose Open."/>
+        <outline text="Use File &gt; Check for Updates to open the GitHub Releases page."/>
       </outline>
     </outline>
   </body>

@@ -109,7 +109,7 @@ enum WindowTabCoordinator {
 
 enum SessionState {
     private static let key = "openDocumentPaths"
-    private static let didShowWelcomeDocumentKey = "didShowWelcomeDocument"
+    private static let didShowWelcomeDocumentKey = "didShowWelcomeDocument.1.2.0"
     static let openURLsNotification = Notification.Name("StrataOpenURLsNotification")
 
     struct PendingUntitledCopy {
@@ -672,6 +672,12 @@ struct StrataApp: App {
 
                 Divider()
 
+                Button("Check for Updates...") {
+                    openUpdatesPage()
+                }
+
+                Divider()
+
                 Menu("Export As") {
                     Button("Plain Text (.txt)") {
                         activeStore?.exportAs(format: "txt")
@@ -861,6 +867,11 @@ struct StrataApp: App {
         )
         WindowTabCoordinator.requestNextWindowAsTab()
         openWindow(id: "main")
+    }
+
+    private func openUpdatesPage() {
+        guard let url = URL(string: "https://github.com/ymolodtsov/strata/releases") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func activeFieldEditor() -> NSTextView? {
