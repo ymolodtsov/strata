@@ -13,6 +13,7 @@ private enum OutlineLayoutMetrics {
     static let checkboxIconSize: CGFloat = 15
     static let chevronIconSize: CGFloat = 10
     static let bulletSize: CGFloat = 6
+    static let bulletHoverOutlineSize: CGFloat = 12
     static let controlTopOffset: CGFloat = -2
     static let textTopOffset: CGFloat = 1
 
@@ -90,10 +91,17 @@ struct NodeRowView: View {
             // Bullet — always present, click to focus/zoom in, drag handle
             ZStack {
                 Circle()
+                    .stroke(Color.primary.opacity(isHovered ? 0.18 : 0), lineWidth: 1.25)
+                    .frame(
+                        width: OutlineLayoutMetrics.bulletHoverOutlineSize,
+                        height: OutlineLayoutMetrics.bulletHoverOutlineSize
+                    )
+
+                Circle()
                     .fill(Color.primary.opacity(isHovered ? 0.35 : 0.22))
                     .frame(width: OutlineLayoutMetrics.bulletSize, height: OutlineLayoutMetrics.bulletSize)
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
             }
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
             .frame(width: OutlineLayoutMetrics.bulletWidth, height: OutlineLayoutMetrics.controlHeight)
             .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
