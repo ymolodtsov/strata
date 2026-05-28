@@ -4,13 +4,21 @@ import UniformTypeIdentifiers
 
 private enum OutlineLayoutMetrics {
     static let indentWidth: CGFloat = 24
-    static let checkboxWidth: CGFloat = 22
+    static let controlHeight: CGFloat = 26
+    static let checkboxWidth: CGFloat = 24
     static let chevronWidth: CGFloat = 16
     static let bulletWidth: CGFloat = 14
-    static let textGap: CGFloat = 6
+    static let textGap: CGFloat = 5
+    static let checkboxIconSize: CGFloat = 15
+    static let chevronIconSize: CGFloat = 10
+    static let bulletSize: CGFloat = 6
 
     static func guideX(forDepth depth: Int) -> CGFloat {
         CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + bulletWidth / 2
+    }
+
+    static func textLeading(forDepth depth: Int) -> CGFloat {
+        CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + bulletWidth + textGap
     }
 }
 
@@ -42,15 +50,15 @@ struct NodeRowView: View {
             ZStack {
                 if node.isDone {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
+                        .font(.system(size: OutlineLayoutMetrics.checkboxIconSize))
                         .foregroundStyle(Color.primary.opacity(0.3))
                 } else if isHovered {
                     Image(systemName: "circle")
-                        .font(.system(size: 14))
+                        .font(.system(size: OutlineLayoutMetrics.checkboxIconSize))
                         .foregroundStyle(Color.primary.opacity(0.12))
                 }
             }
-            .frame(width: 22, height: 22)
+            .frame(width: OutlineLayoutMetrics.checkboxWidth, height: OutlineLayoutMetrics.controlHeight)
             .contentShape(Rectangle())
             .onTapGesture {
                 store.toggleDone(nodeId: node.id)
@@ -60,13 +68,13 @@ struct NodeRowView: View {
             ZStack {
                 if !node.children.isEmpty {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: OutlineLayoutMetrics.chevronIconSize, weight: .semibold))
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .rotationEffect(.degrees(node.isExpanded ? 90 : 0))
                         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: node.isExpanded)
                 }
             }
-            .frame(width: 16, height: 22)
+            .frame(width: OutlineLayoutMetrics.chevronWidth, height: OutlineLayoutMetrics.controlHeight)
             .contentShape(Rectangle())
             .onTapGesture {
                 if !node.children.isEmpty {
@@ -78,10 +86,10 @@ struct NodeRowView: View {
             ZStack {
                 Circle()
                     .fill(Color.primary.opacity(isHovered ? 0.35 : 0.22))
-                    .frame(width: 6, height: 6)
+                    .frame(width: OutlineLayoutMetrics.bulletSize, height: OutlineLayoutMetrics.bulletSize)
                     .animation(.easeInOut(duration: 0.15), value: isHovered)
             }
-            .frame(width: 14, height: 22)
+            .frame(width: OutlineLayoutMetrics.bulletWidth, height: OutlineLayoutMetrics.controlHeight)
             .contentShape(Rectangle())
             .onTapGesture {
                 store.zoomIn(nodeId: node.id)
@@ -267,7 +275,7 @@ struct NodeRowView: View {
 
     private var dropIndicatorLeadingPadding: CGFloat {
         let targetDepth = dropAsChild ? depth + 1 : depth
-        return CGFloat(targetDepth) * OutlineLayoutMetrics.indentWidth + OutlineLayoutMetrics.checkboxWidth
+        return OutlineLayoutMetrics.textLeading(forDepth: targetDepth)
     }
 
     private var dragPreview: some View {
@@ -384,11 +392,7 @@ struct NoteEditorView: View {
     @FocusState private var isFocused: Bool
 
     private var leadingPad: CGFloat {
-        CGFloat(depth) * OutlineLayoutMetrics.indentWidth
-            + OutlineLayoutMetrics.checkboxWidth
-            + OutlineLayoutMetrics.chevronWidth
-            + OutlineLayoutMetrics.bulletWidth
-            + OutlineLayoutMetrics.textGap
+        OutlineLayoutMetrics.textLeading(forDepth: depth)
     }
 
     var body: some View {
