@@ -78,6 +78,8 @@ struct NodeRowView: View {
             }
             .onDrag {
                 dragProvider()
+            } preview: {
+                dragPreview
             }
             .help("Focus on this node")
 
@@ -170,6 +172,8 @@ struct NodeRowView: View {
                         }
                         .onDrag {
                             dragProvider()
+                        } preview: {
+                            dragPreview
                         }
                 }
             }
@@ -193,7 +197,7 @@ struct NodeRowView: View {
                 }
             }
         )
-        .opacity(store.draggedNodeIds.contains(node.id) ? 0.35 : 1.0)
+        .opacity(store.draggedNodeIds.contains(node.id) ? 0.12 : 1.0)
         .overlay(alignment: store.dropAbove ? .top : .bottom) {
             if store.dropTargetId == node.id && !store.draggedNodeIds.contains(node.id) {
                 Rectangle()
@@ -205,9 +209,11 @@ struct NodeRowView: View {
         .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, store: store))
         .onHover { isHovered = $0 }
         .contentShape(Rectangle())
-        .draggableWhenSelected(isSelected) {
+        .draggableWhenSelected(isSelected, provider: {
             dragProvider()
-        }
+        }, preview: {
+            dragPreview
+        })
         .simultaneousGesture(
             TapGesture().onEnded {
                 handleModifiedRowClick()
@@ -237,16 +243,53 @@ struct NodeRowView: View {
         let label = count == 1 ? node.text : "\(count) Strata nodes"
         return NSItemProvider(object: NSString(string: label))
     }
+
+    private var dragPreview: some View {
+        let count = max(store.draggedNodeIds.count, 1)
+        let title = node.text.isEmpty ? "Untitled" : node.text
+
+        return HStack(spacing: 10) {
+            Image(systemName: count == 1 ? "circle.fill" : "line.3.horizontal")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if count > 1 {
+                    Text("\(count) nodes")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .frame(maxWidth: 300, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(.controlBackgroundColor))
+                .shadow(color: .black.opacity(0.18), radius: 14, y: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        )
+    }
 }
 
 private extension View {
     @ViewBuilder
-    func draggableWhenSelected(
+    func draggableWhenSelected<Preview: View>(
         _ isSelected: Bool,
-        provider: @escaping () -> NSItemProvider
+        provider: @escaping () -> NSItemProvider,
+        preview: @escaping () -> Preview
     ) -> some View {
         if isSelected {
-            self.onDrag(provider)
+            self.onDrag(provider, preview: preview)
         } else {
             self
         }
