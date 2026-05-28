@@ -54,7 +54,7 @@ enum WindowTabCoordinator {
     }
 
     private static func hideAutomaticTabAddButton(in window: NSWindow) {
-        let delays: [TimeInterval] = [0, 0.05, 0.2]
+        let delays: [TimeInterval] = [0, 0.05, 0.2, 0.6, 1.0]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard let frameView = window.contentView?.superview else { return }
@@ -64,11 +64,11 @@ enum WindowTabCoordinator {
                     window.standardWindowButton(.zoomButton)
                 ].compactMap { $0 })
 
-                for button in frameView.allSubviews.compactMap({ $0 as? NSButton }) {
-                    guard !standardButtons.contains(button),
-                          button.isAutomaticTabAddButton else { continue }
-                    button.isHidden = true
-                    button.isEnabled = false
+                for view in frameView.allSubviews {
+                    guard !standardButtons.contains(where: { view === $0 || view.isDescendant(of: $0) }),
+                          view.isAutomaticTabAddControl else { continue }
+                    view.isHidden = true
+                    view.alphaValue = 0
                 }
             }
         }
@@ -81,36 +81,47 @@ private extension NSView {
     }
 }
 
-private extension NSButton {
-    var isAutomaticTabAddButton: Bool {
+private extension NSView {
+    var isAutomaticTabAddControl: Bool {
         let text = [
-            title,
-            alternateTitle,
             toolTip,
             accessibilityLabel(),
             accessibilityHelp(),
-            accessibilityTitle()
+            accessibilityTitle(),
+            accessibilityValue() as? String,
+            accessibilityIdentifier()
         ]
         .compactMap { $0 }
         .joined(separator: " ")
         .lowercased()
 
-        if text.contains("new tab") || text.contains("add tab") {
+        if text.contains("new tab") || text.contains("add tab") || text.contains("show tab overview") {
             return true
         }
 
-        let imageName = [image?.name(), alternateImage?.name()]
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
+        let buttonLike = accessibilityRole() == .button || String(describing: type(of: self)).lowercased().contains("button")
+        let className = String(describing: type(of: self)).lowercased()
 
-        let looksLikePlus = title.trimmingCharacters(in: .whitespacesAndNewlines) == "+" ||
+        var imageName = ""
+        if let button = self as? NSButton {
+            imageName = [button.image?.name(), button.alternateImage?.name()]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+        }
+
+        let looksLikePlus =
             text.trimmingCharacters(in: .whitespacesAndNewlines) == "+" ||
             imageName.contains("plus") ||
-            imageName.contains("add")
+            imageName.contains("add") ||
+            className.contains("add") ||
+            className.contains("plus")
 
-        guard looksLikePlus else { return false }
-        return frame.width >= 20 && frame.width <= 44 && frame.height >= 20 && frame.height <= 44
+        guard buttonLike || looksLikePlus else { return false }
+        guard frame.width >= 18 && frame.width <= 54 && frame.height >= 18 && frame.height <= 54 else { return false }
+
+        let frameInWindow = convert(bounds, to: nil)
+        return frameInWindow.minY >= 0
     }
 }
 
