@@ -173,6 +173,7 @@ struct NodeRowView: View {
                     shouldRouteStructuralRedoToStore: { store.shouldRouteStructuralRedoToStore },
                     searchQuery: searchQuery
                 )
+                .id("\(node.id.uuidString)-\(depth)")
                 .allowsHitTesting(!hasSelection)
 
                 if hasSelection {
