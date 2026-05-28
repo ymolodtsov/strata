@@ -242,6 +242,8 @@ struct NodeRowView: View {
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if flags.contains(.shift) || flags.contains(.command) {
             store.handleNodeClick(node.id, modifiers: flags)
+        } else if isSelected {
+            store.focusNodeForEditing(node.id)
         } else {
             store.selectNode(node.id)
         }

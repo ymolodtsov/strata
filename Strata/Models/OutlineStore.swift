@@ -529,8 +529,15 @@ class OutlineStore {
     func focusFirstSelected() {
         let visible = visibleNodes()
         if let firstIdx = visible.indices.first(where: { selectedNodeIds.contains(visible[$0].node.id) }) {
-            pendingFocusId = visible[firstIdx].node.id
+            focusNodeForEditing(visible[firstIdx].node.id)
+        } else {
+            clearSelection()
         }
+    }
+
+    func focusNodeForEditing(_ nodeId: UUID) {
+        pendingFocusId = nodeId
+        pendingCursorPosition = nil
         clearSelection()
     }
 
