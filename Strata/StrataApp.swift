@@ -63,6 +63,7 @@ enum WindowTabCoordinator {
     private static func configureChrome(_ window: NSWindow) {
         window.isRestorable = false
         window.restorationClass = nil
+        window.titlebarSeparatorStyle = .none
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
