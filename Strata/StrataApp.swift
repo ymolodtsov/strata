@@ -81,10 +81,26 @@ enum WindowTabCoordinator {
         if window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.remove(.fullSizeContentView)
         }
-        suppressTitlebarScrollEdgeRule(in: window)
-        DispatchQueue.main.async {
-            suppressTitlebarScrollEdgeRule(in: window)
+        scheduleTitlebarRuleSuppression(in: window)
+    }
+
+    private static func scheduleTitlebarRuleSuppression(in window: NSWindow) {
+        applyTitlebarRuleSuppression(in: window)
+
+        // Tahoe can rebuild the titlebar scroll-edge pocket after the window
+        // becomes key or after native tabs settle. Reapply over the next run
+        // loop turns so the final AppKit-created 1px rule stays hidden.
+        for delay in [0.0, 0.03, 0.12, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
+                guard let window else { return }
+                applyTitlebarRuleSuppression(in: window)
+            }
         }
+    }
+
+    private static func applyTitlebarRuleSuppression(in window: NSWindow) {
+        window.titlebarSeparatorStyle = .none
+        suppressTitlebarScrollEdgeRule(in: window)
     }
 
     private static func suppressTitlebarScrollEdgeRule(in window: NSWindow) {
@@ -99,7 +115,8 @@ enum WindowTabCoordinator {
         var foundRule = false
 
         // Tahoe's titlebar scroll edge can leave a hard 1px rule after tabbing.
-        if isTitlebarBackground && className.contains("_NSLayerBasedFillColorView") {
+        let isHairline = view.frame.height <= 1.5 && view.frame.width > 0
+        if isTitlebarBackground && (className.contains("_NSLayerBasedFillColorView") || isHairline) {
             view.isHidden = true
             view.alphaValue = 0
             foundRule = true
