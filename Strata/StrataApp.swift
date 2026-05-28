@@ -30,15 +30,29 @@ enum WindowTabCoordinator {
         window.setFrame(parent.frame, display: false)
         window.alphaValue = 0
         window.orderOut(nil)
+        let parentAnimationBehavior = parent.animationBehavior
+        let windowAnimationBehavior = window.animationBehavior
+        parent.animationBehavior = .none
+        window.animationBehavior = .none
         parent.tabbingMode = .preferred
         window.tabbingMode = .preferred
-        parent.addTabbedWindow(window, ordered: .above)
-        window.alphaValue = 1
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            if let tabGroup = parent.tabGroup {
+                tabGroup.addWindow(window)
+                tabGroup.selectedWindow = window
+            } else {
+                parent.addTabbedWindow(window, ordered: .above)
+            }
+            window.alphaValue = 1
+        }
+        parent.animationBehavior = parentAnimationBehavior
+        window.animationBehavior = windowAnimationBehavior
         pendingTabCount -= 1
         if pendingTabCount == 0 {
             requestedParentWindow = nil
         }
-        window.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async {
             configureVisibleWindows()
         }
