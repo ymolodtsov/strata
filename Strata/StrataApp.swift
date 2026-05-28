@@ -657,6 +657,7 @@ struct DocumentWindowView: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignObserver: Any?
     private var closeObserver: Any?
+    private var isTerminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep tab creation under Strata's Cmd-T/menu flow until the app moves to
@@ -674,8 +675,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         closeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: nil, queue: .main
-        ) { notification in
+        ) { [weak self] notification in
             guard let window = notification.object as? NSWindow else { return }
+            guard self?.isTerminating != true else { return }
             WindowTabCoordinator.forget(window: window)
             SessionState.forgetAndSave(window: window)
             DispatchQueue.main.async {
@@ -685,6 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         SessionState.saveOpenDocuments()
     }
 
