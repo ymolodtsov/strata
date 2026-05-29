@@ -112,7 +112,7 @@ struct NodeRowView: View {
             .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
             .onTapGesture {
-                store.zoomIn(nodeId: node.id)
+                handleBulletClick()
             }
             .onDrag {
                 dragProvider()
@@ -260,18 +260,16 @@ struct NodeRowView: View {
         }, preview: {
             dragPreview
         })
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                handleModifiedRowClick()
-            }
-        )
         .id(node.id)
     }
 
-    private func handleModifiedRowClick() {
+    private func handleBulletClick() {
         let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags.contains(.shift) || flags.contains(.command) else { return }
-        store.handleNodeClick(node.id, modifiers: flags)
+        if flags.contains(.shift) || flags.contains(.command) {
+            store.handleNodeClick(node.id, modifiers: flags)
+        } else {
+            store.zoomIn(nodeId: node.id)
+        }
     }
 
     private func handleTextAreaClick() {
@@ -358,12 +356,32 @@ private struct VisibleGuideItem: Sendable {
 }
 
 private struct HierarchyGuideOverlay: Shape {
-    let items: [VisibleGuideItem]
-    let rowFrames: [UUID: CGRect]
+    let segments: [HierarchyGuideSegment]
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        guard items.count > 1 else { return path }
+
+        for segment in segments {
+            path.move(to: CGPoint(x: segment.x, y: segment.startY))
+            path.addLine(to: CGPoint(x: segment.x, y: segment.endY))
+        }
+
+        return path
+    }
+}
+
+private struct HierarchyGuideSegment: Sendable, Equatable {
+    let x: CGFloat
+    let startY: CGFloat
+    let endY: CGFloat
+}
+
+private enum HierarchyGuideLayout {
+    static func segments(items: [VisibleGuideItem], rowFrames: [UUID: CGRect]) -> [HierarchyGuideSegment] {
+        guard items.count > 1 else { return [] }
+
+        var segments: [HierarchyGuideSegment] = []
+        segments.reserveCapacity(items.count / 2)
 
         for index in items.indices {
             let item = items[index]
@@ -385,11 +403,30 @@ private struct HierarchyGuideOverlay: Shape {
             let endY = lastFrame.maxY - 4
             guard endY > startY else { continue }
 
-            path.move(to: CGPoint(x: x, y: startY))
-            path.addLine(to: CGPoint(x: x, y: endY))
+            segments.append(HierarchyGuideSegment(x: x, startY: startY, endY: endY))
         }
 
-        return path
+        return segments
+    }
+
+    static func framesAreVisuallyEqual(_ lhs: [UUID: CGRect], _ rhs: [UUID: CGRect]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (id, leftFrame) in lhs {
+            guard let rightFrame = rhs[id],
+                  leftFrame.isVisuallyEqual(to: rightFrame) else { return false }
+        }
+
+        return true
+    }
+}
+
+private extension CGRect {
+    func isVisuallyEqual(to other: CGRect, tolerance: CGFloat = 0.5) -> Bool {
+        abs(minX - other.minX) < tolerance &&
+        abs(minY - other.minY) < tolerance &&
+        abs(width - other.width) < tolerance &&
+        abs(height - other.height) < tolerance
     }
 }
 
@@ -493,6 +530,7 @@ struct FlatOutline: View {
     var body: some View {
         let items = store.visibleNodes().map { VisibleItem(node: $0.node, depth: $0.depth) }
         let guideItems = items.map { VisibleGuideItem(id: $0.id, depth: $0.depth, isExpanded: $0.node.isExpanded) }
+        let guideSegments = HierarchyGuideLayout.segments(items: guideItems, rowFrames: rowFrames)
         let selectedIds = store.selectedNodeIds
         let draggedIds = store.draggedNodeIds
         let selectedCount = selectedIds.count
@@ -505,7 +543,7 @@ struct FlatOutline: View {
         let searchQuery = store.isSearchActive ? store.searchQuery : ""
 
         ZStack(alignment: .topLeading) {
-            HierarchyGuideOverlay(items: guideItems, rowFrames: rowFrames)
+            HierarchyGuideOverlay(segments: guideSegments)
                 .stroke(Color.primary.opacity(0.11), lineWidth: 1)
                 .allowsHitTesting(false)
 
@@ -537,7 +575,9 @@ struct FlatOutline: View {
         }
         .coordinateSpace(name: OutlineLayoutMetrics.outlineCoordinateSpace)
         .onPreferenceChange(RowFramePreferenceKey.self) { frames in
-            rowFrames = frames
+            if !HierarchyGuideLayout.framesAreVisuallyEqual(rowFrames, frames) {
+                rowFrames = frames
+            }
         }
     }
 }
