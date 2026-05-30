@@ -117,6 +117,8 @@ enum ExportService {
                     output = "**\(output)**"
                 case .italic:
                     output = "*\(output)*"
+                case .underline:
+                    output = "<u>\(output)</u>"
                 case .highlight:
                     output = "==\(output)=="
                 case .link:
@@ -137,6 +139,8 @@ enum ExportService {
                     output = "<strong>\(output)</strong>"
                 case .italic:
                     output = "<em>\(output)</em>"
+                case .underline:
+                    output = "<u>\(output)</u>"
                 case .highlight:
                     output = "<mark>\(output)</mark>"
                 case .link:
@@ -190,8 +194,9 @@ enum ExportService {
         switch kind {
         case .bold: return 0
         case .italic: return 1
-        case .highlight: return 2
-        case .link: return 3
+        case .underline: return 2
+        case .highlight: return 3
+        case .link: return 4
         }
     }
 }

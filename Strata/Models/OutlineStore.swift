@@ -1495,14 +1495,19 @@ class OutlineStore {
         let displayName: String?
     }
 
-    private static func loadDocument(from url: URL) -> LoadedDocument? {
+    private static func loadDocument(from url: URL, opmlMode: OPMLService.ParseMode = .standard, savesOPMLBackToOriginal: Bool = true) -> LoadedDocument? {
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url) else { return nil }
 
         let ext = url.pathExtension.lowercased()
         if ext == "opml" {
-            guard let root = try? OPMLService.parse(data: data) else { return nil }
-            return LoadedDocument(root: root, savesBackToOriginalURL: true, displayName: nil)
+            guard let root = try? OPMLService.parse(data: data, mode: opmlMode) else { return nil }
+            let title = url.deletingPathExtension().lastPathComponent
+            return LoadedDocument(
+                root: root,
+                savesBackToOriginalURL: savesOPMLBackToOriginal,
+                displayName: savesOPMLBackToOriginal ? nil : "\(title).opml"
+            )
         }
 
         guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) else {
@@ -1513,6 +1518,30 @@ class OutlineStore {
         let title = url.deletingPathExtension().lastPathComponent
         let root = parseOutlineText(text, title: title, markdown: isMarkdown)
         return LoadedDocument(root: root, savesBackToOriginalURL: false, displayName: "\(title).opml")
+    }
+
+    func loadWorkflowyOPMLImport(from url: URL) {
+        guard let loaded = Self.loadDocument(
+            from: url,
+            opmlMode: .workflowy,
+            savesOPMLBackToOriginal: false
+        ) else { return }
+
+        save()
+
+        root = loaded.root
+        ensureEditableRoot()
+        currentFilePath = nil
+        untitledDisplayName = loaded.displayName
+        zoomPath = []
+        undoStack.removeAll()
+        redoStack.removeAll()
+        selectedNodeIds.removeAll()
+        draggedNodeIds.removeAll()
+        dropTargetId = nil
+        dropAsChild = false
+        treeModifiedSinceLastSnapshot = true
+        pendingFocusId = root.children.first?.id
     }
 
     private static func parseOutlineText(_ text: String, title: String, markdown: Bool) -> OutlineNode {

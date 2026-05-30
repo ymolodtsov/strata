@@ -324,6 +324,8 @@ struct OutlineTextField: NSViewRepresentable {
                 applyFontTrait(.boldFontMask, to: range)
             case .italic:
                 applyFontTrait(.italicFontMask, to: range)
+            case .underline:
+                attributed.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
             case .highlight:
                 attributed.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
             case .link:
@@ -408,10 +410,10 @@ struct OutlineTextField: NSViewRepresentable {
         attributes[.foregroundColor] = attributes[.foregroundColor] ?? fallbackColor
         attributes[.paragraphStyle] = paragraphStyle
         attributes.removeValue(forKey: .link)
-        attributes.removeValue(forKey: .underlineStyle)
         attributes.removeValue(forKey: manualLinkURLAttribute)
         if attributes[formattingAttribute] as? String == TextFormattingKind.link.rawValue {
             attributes.removeValue(forKey: formattingAttribute)
+            attributes.removeValue(forKey: .underlineStyle)
         }
         return attributes
     }
@@ -745,6 +747,8 @@ struct OutlineTextField: NSViewRepresentable {
                 switch kind {
                 case .highlight:
                     spans.append(TextFormattingSpan(kind: .highlight, location: range.location, length: range.length))
+                case .underline:
+                    spans.append(TextFormattingSpan(kind: .underline, location: range.location, length: range.length))
                 case .bold, .italic, .link:
                     return
                 }
@@ -959,7 +963,7 @@ class StrataTextField: NSTextField {
                 return event
             }
             let locationInEditor = editor.convert(event.locationInWindow, from: nil)
-            if editor.bounds.contains(locationInEditor) {
+            if editor.bounds.contains(locationInEditor) || self.window?.firstResponder === editor {
                 let menu = self.buildContextMenu()
                 NSMenu.popUpContextMenu(menu, with: event, for: editor)
                 return nil
@@ -1079,6 +1083,11 @@ class StrataTextField: NSTextField {
         italicItem.target = self
         menu.addItem(italicItem)
 
+        let underlineItem = NSMenuItem(title: "Underline", action: #selector(underline(_:)), keyEquivalent: "u")
+        underlineItem.keyEquivalentModifierMask = .command
+        underlineItem.target = self
+        menu.addItem(underlineItem)
+
         let highlightItem = NSMenuItem(title: "Highlight", action: #selector(wrapHighlight), keyEquivalent: "")
         highlightItem.target = self
         menu.addItem(highlightItem)
@@ -1103,6 +1112,8 @@ class StrataTextField: NSTextField {
 
     @objc func wrapBold() { toggleFormatting(.bold) }
     @objc func wrapItalic() { toggleFormatting(.italic) }
+    @objc func wrapUnderline() { toggleFormatting(.underline) }
+    @objc func underline(_ sender: Any?) { wrapUnderline() }
     @objc func wrapHighlight() { toggleFormatting(.highlight) }
 
     func insertDateString(_ dateString: String) {
@@ -1188,6 +1199,14 @@ class StrataTextField: NSTextField {
             toggleFontTrait(.boldFontMask, in: range, storage: storage)
         case .italic:
             toggleFontTrait(.italicFontMask, in: range, storage: storage)
+        case .underline:
+            if storage.attribute(.underlineStyle, at: range.location, effectiveRange: nil) == nil {
+                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                storage.addAttribute(OutlineTextField.formattingAttribute, value: kind.rawValue, range: range)
+            } else {
+                storage.removeAttribute(.underlineStyle, range: range)
+                storage.removeAttribute(OutlineTextField.formattingAttribute, range: range)
+            }
         case .highlight:
             if storage.attribute(.backgroundColor, at: range.location, effectiveRange: nil) == nil {
                 storage.addAttribute(.backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.3), range: range)
@@ -1215,6 +1234,14 @@ class StrataTextField: NSTextField {
             attributes[.font] = toggledFontTrait(.boldFontMask, font: baseFont)
         case .italic:
             attributes[.font] = toggledFontTrait(.italicFontMask, font: baseFont)
+        case .underline:
+            if attributes[.underlineStyle] == nil {
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                attributes[OutlineTextField.formattingAttribute] = TextFormattingKind.underline.rawValue
+            } else {
+                attributes.removeValue(forKey: .underlineStyle)
+                attributes.removeValue(forKey: OutlineTextField.formattingAttribute)
+            }
         case .highlight:
             if attributes[.backgroundColor] == nil {
                 attributes[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.3)
@@ -1315,6 +1342,11 @@ class StrataTextField: NSTextField {
         // Cmd+I — Italic
         if event.keyCode == 34 && flags == .command {
             wrapItalic()
+            return true
+        }
+        // Cmd+U — Underline
+        if event.keyCode == 32 && flags == .command {
+            wrapUnderline()
             return true
         }
         // Cmd+L — Highlight

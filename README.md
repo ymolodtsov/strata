@@ -42,10 +42,12 @@ Strata uses OPML as its primary file format. It stores Strata-specific state usi
 
 - `_complete="true"` for completed nodes.
 - `_collapsed="true"` for collapsed branches.
-- `_strata_formatting="..."` for rich-text formatting and links.
+- `_strata_formatting="..."` for rich-text formatting and links, including bold, italic, underline, highlight, and links.
 - `_note="..."` for node notes.
 
 Other OPML apps should still be able to read the outline text, though they may ignore Strata-specific metadata.
+
+Use **File > Import from Workflowy OPML...** for Workflowy exports. The importer reads Workflowy notes from `note` or `_note`, completed state from `_complete` and common completed variants, and converts inline OPML HTML such as bold, italic, underline, links, and highlights into Strata formatting spans. Workflowy `#` and `@` tags import as plain text. Imports open as untitled Strata documents so the original Workflowy export is not overwritten.
 
 ## Build From Source
 

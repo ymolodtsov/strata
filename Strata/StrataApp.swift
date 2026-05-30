@@ -131,6 +131,7 @@ enum SessionState {
 
     /// URLs waiting to be loaded by newly created windows during restoration.
     static var pendingRestoreURLs: [URL] = []
+    static var pendingWorkflowyImportURLs: [URL] = []
     static var pendingUntitledCopies: [PendingUntitledCopy] = []
     private static var pendingOpenURLs: [URL] = []
 
@@ -413,6 +414,9 @@ struct DocumentWindowView: View {
                     // This window was created during session restoration — load its file
                     SessionState.pendingRestoreURLs.removeFirst()
                     store.loadFile(from: url)
+                } else if let url = SessionState.pendingWorkflowyImportURLs.first {
+                    SessionState.pendingWorkflowyImportURLs.removeFirst()
+                    store.loadWorkflowyOPMLImport(from: url)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: SessionState.openURLsNotification)) { _ in
@@ -655,6 +659,10 @@ struct StrataApp: App {
                 }
                 .keyboardShortcut("o")
 
+                Button("Import from Workflowy OPML...") {
+                    importWorkflowyOPMLAsTab()
+                }
+
                 Menu("Open Recent") {
                     let urls = recentFiles.urls
                     ForEach(urls, id: \.self) { url in
@@ -745,6 +753,11 @@ struct StrataApp: App {
                     StrataTextField.currentEditingField?.wrapItalic()
                 }
                 .keyboardShortcut("i", modifiers: .command)
+
+                Button("Underline") {
+                    StrataTextField.currentEditingField?.wrapUnderline()
+                }
+                .keyboardShortcut("u", modifiers: .command)
 
                 Button("Highlight") {
                     StrataTextField.currentEditingField?.wrapHighlight()
@@ -864,6 +877,16 @@ struct StrataApp: App {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openURLAsTab(url)
+    }
+
+    private func importWorkflowyOPMLAsTab() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [OutlineStore.opmlContentType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openWorkflowyImportURLAsTab(url)
     }
 
     private func openUntitledTab() {
@@ -988,6 +1011,25 @@ struct StrataApp: App {
         } else {
             // Fallback for menu/native recent paths where SwiftUI focused values are unavailable.
             SessionState.queueOpenURLs([fileURL])
+        }
+    }
+
+    private func openWorkflowyImportURLAsTab(_ url: URL) {
+        let fileURL = url.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            NSSound.beep()
+            return
+        }
+
+        let targetStore = activeStore ?? SessionState.bestActiveStore()
+        if let store = targetStore, store.currentFilePath == nil {
+            store.loadWorkflowyOPMLImport(from: fileURL)
+        } else if let openWindow = openWindowAction {
+            WindowTabCoordinator.requestNextWindowAsTab()
+            SessionState.pendingWorkflowyImportURLs.append(fileURL)
+            openWindow(id: "main")
+        } else {
+            NSSound.beep()
         }
     }
 

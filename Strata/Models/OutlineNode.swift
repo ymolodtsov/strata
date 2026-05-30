@@ -3,6 +3,7 @@ import Foundation
 enum TextFormattingKind: String, Codable, Hashable {
     case bold
     case italic
+    case underline
     case highlight
     case link
 }
