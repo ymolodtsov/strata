@@ -16,6 +16,7 @@ enum OPMLService {
 
     static func serialize(root: OutlineNode) -> Data {
         var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        xml.reserveCapacity(max(4_096, estimatedSerializedSize(root: root)))
         xml += "<opml version=\"2.0\">\n"
         xml += "  <head>\n"
         xml += "    <title>\(escapeXML(root.text))</title>\n"
@@ -27,6 +28,24 @@ enum OPMLService {
         xml += "  </body>\n"
         xml += "</opml>\n"
         return xml.data(using: .utf8) ?? Data()
+    }
+
+    private static func estimatedSerializedSize(root: OutlineNode) -> Int {
+        var total = 160 + root.text.utf8.count
+
+        func visit(_ node: OutlineNode, depth: Int) {
+            total += 64 + (depth * 4) + node.text.utf8.count + node.note.utf8.count
+            total += node.formatting.count * 80
+            for child in node.children {
+                visit(child, depth: depth + 1)
+            }
+        }
+
+        for child in root.children {
+            visit(child, depth: 2)
+        }
+
+        return total
     }
 
     private static func serializeNode(_ node: OutlineNode, indent: Int, into xml: inout String) {
@@ -71,13 +90,19 @@ enum OPMLService {
     }
 
     private static func escapeXML(_ string: String) -> String {
-        string
+        guard string.rangeOfCharacter(from: xmlEscapedCharacters) != nil else {
+            return string
+        }
+
+        return string
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
     }
+
+    private static let xmlEscapedCharacters = CharacterSet(charactersIn: "&<>\"'")
 }
 
 // MARK: - XML Parser
@@ -130,7 +155,7 @@ private class OPMLParser: NSObject, XMLParserDelegate {
 
         guard inBody, elementName == "outline" else { return }
 
-        var text = attributeDict["text"] ?? ""
+        let text = attributeDict["text"] ?? ""
         var formatting: [TextFormattingSpan]
         if let json = attributeDict["_strata_formatting"],
            let data = json.data(using: .utf8),
@@ -138,9 +163,6 @@ private class OPMLParser: NSObject, XMLParserDelegate {
             formatting = decoded.normalized(forTextLength: (text as NSString).length)
         } else {
             formatting = []
-            let converted = Self.convertLegacyMarkdownFormatting(in: text)
-            text = converted.text
-            formatting = converted.formatting.normalized(forTextLength: (text as NSString).length)
         }
         let note = attributeDict["_note"] ?? ""
         let isDone = attributeDict["_complete"] == "true"
@@ -187,39 +209,4 @@ private class OPMLParser: NSObject, XMLParserDelegate {
         }
     }
 
-    private static func convertLegacyMarkdownFormatting(in input: String) -> (text: String, formatting: [TextFormattingSpan]) {
-        var text = input
-        var formatting: [TextFormattingSpan] = []
-
-        func apply(_ pattern: String, kind: TextFormattingKind) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-            let nsText = text as NSString
-            let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
-            guard !matches.isEmpty else { return }
-
-            for match in matches.reversed() {
-                let current = text as NSString
-                let contentRange = match.range(at: 1)
-                let content = current.substring(with: contentRange)
-                let replacementLength = (content as NSString).length
-                let removedLength = match.range.length - replacementLength
-
-                text = current.replacingCharacters(in: match.range, with: content)
-                formatting = formatting.map { span in
-                    var shifted = span
-                    if shifted.location >= match.range.location + match.range.length {
-                        shifted.location -= removedLength
-                    }
-                    return shifted
-                }
-                formatting.append(TextFormattingSpan(kind: kind, location: match.range.location, length: replacementLength))
-            }
-        }
-
-        apply("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", kind: .bold)
-        apply("==(?=\\S)(.+?)(?<=\\S)==", kind: .highlight)
-        apply("(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)", kind: .italic)
-
-        return (text, formatting.normalized(forTextLength: (text as NSString).length))
-    }
 }

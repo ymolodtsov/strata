@@ -87,6 +87,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .padding(.top, 8)
 
             if store.hasSelection {
                 Divider()

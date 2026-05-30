@@ -119,7 +119,6 @@ struct NodeRowView: View {
             } preview: {
                 dragPreview
             }
-            .help("Focus on this node")
 
             Spacer().frame(width: OutlineLayoutMetrics.textGap)
 
@@ -349,12 +348,6 @@ private extension NodeRowView {
     }
 }
 
-private struct VisibleGuideItem: Sendable {
-    let id: UUID
-    let depth: Int
-    let isExpanded: Bool
-}
-
 private struct HierarchyGuideOverlay: Shape {
     let segments: [HierarchyGuideSegment]
 
@@ -377,33 +370,72 @@ private struct HierarchyGuideSegment: Sendable, Equatable {
 }
 
 private enum HierarchyGuideLayout {
-    static func segments(items: [VisibleGuideItem], rowFrames: [UUID: CGRect]) -> [HierarchyGuideSegment] {
-        guard items.count > 1 else { return [] }
+    private struct FramedGuideItem {
+        let item: VisibleItem
+        let frame: CGRect
+    }
+
+    static func segments(items: [VisibleItem], rowFrames: [UUID: CGRect]) -> [HierarchyGuideSegment] {
+        guard items.count > 1, !rowFrames.isEmpty else { return [] }
+
+        let framedItems = items.compactMap { item -> FramedGuideItem? in
+            guard let frame = rowFrames[item.id] else { return nil }
+            return FramedGuideItem(item: item, frame: frame)
+        }
+
+        guard framedItems.count > 1 else { return [] }
+
+        let maxDepth = framedItems.map(\.item.depth).max() ?? 0
+        guard maxDepth > 0 else { return [] }
 
         var segments: [HierarchyGuideSegment] = []
-        segments.reserveCapacity(items.count / 2)
+        segments.reserveCapacity(framedItems.count / 2)
 
-        for index in items.indices {
-            let item = items[index]
-            guard item.isExpanded,
-                  index + 1 < items.count,
-                  items[index + 1].depth > item.depth,
-                  let parentFrame = rowFrames[item.id] else { continue }
+        for guideDepth in 0..<maxDepth {
+            var index = framedItems.startIndex
 
-            var lastDescendantIndex = index + 1
-            while lastDescendantIndex + 1 < items.count,
-                  items[lastDescendantIndex + 1].depth > item.depth {
-                lastDescendantIndex += 1
+            while index < framedItems.endIndex {
+                var startY: CGFloat?
+
+                while index < framedItems.endIndex {
+                    let current = framedItems[index]
+                    let currentDepth = current.item.depth
+
+                    if currentDepth > guideDepth {
+                        startY = current.frame.minY - 1
+                        break
+                    }
+
+                    if currentDepth == guideDepth,
+                       current.item.node.isExpanded,
+                       index + 1 < framedItems.endIndex,
+                       framedItems[index + 1].item.depth > guideDepth {
+                        startY = OutlineLayoutMetrics.dotCenterY(in: current.frame) + (OutlineLayoutMetrics.bulletSize / 2) + 6
+                        index += 1
+                        break
+                    }
+
+                    index += 1
+                }
+
+                guard let startY else { break }
+
+                var lastVisibleDescendant: FramedGuideItem?
+                while index < framedItems.endIndex {
+                    let current = framedItems[index]
+                    guard current.item.depth > guideDepth else { break }
+                    lastVisibleDescendant = current
+                    index += 1
+                }
+
+                guard let lastVisibleDescendant else { continue }
+
+                let x = OutlineLayoutMetrics.guideX(forDepth: guideDepth)
+                let endY = lastVisibleDescendant.frame.maxY - 4
+                guard endY > startY else { continue }
+
+                segments.append(HierarchyGuideSegment(x: x, startY: startY, endY: endY))
             }
-
-            guard let lastFrame = rowFrames[items[lastDescendantIndex].id] else { continue }
-
-            let x = OutlineLayoutMetrics.guideX(forDepth: item.depth)
-            let startY = OutlineLayoutMetrics.dotCenterY(in: parentFrame) + (OutlineLayoutMetrics.bulletSize / 2) + 6
-            let endY = lastFrame.maxY - 4
-            guard endY > startY else { continue }
-
-            segments.append(HierarchyGuideSegment(x: x, startY: startY, endY: endY))
         }
 
         return segments
@@ -529,8 +561,7 @@ struct FlatOutline: View {
 
     var body: some View {
         let items = store.visibleNodes().map { VisibleItem(node: $0.node, depth: $0.depth) }
-        let guideItems = items.map { VisibleGuideItem(id: $0.id, depth: $0.depth, isExpanded: $0.node.isExpanded) }
-        let guideSegments = HierarchyGuideLayout.segments(items: guideItems, rowFrames: rowFrames)
+        let guideSegments = HierarchyGuideLayout.segments(items: items, rowFrames: rowFrames)
         let selectedIds = store.selectedNodeIds
         let draggedIds = store.draggedNodeIds
         let selectedCount = selectedIds.count
@@ -547,7 +578,7 @@ struct FlatOutline: View {
                 .stroke(Color.primary.opacity(0.11), lineWidth: 1)
                 .allowsHitTesting(false)
 
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(items) { item in
                     VStack(alignment: .leading, spacing: 0) {
                         let isSelected = selectedIds.contains(item.node.id)

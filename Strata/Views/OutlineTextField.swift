@@ -235,6 +235,8 @@ struct OutlineTextField: NSViewRepresentable {
                 tf.lastStyledDone != isDone ||
                 tf.lastStyledSearch != searchQ
 
+            guard shouldInvalidateSize else { return }
+
             let styled = Self.styledAttributedString(
                 from: currentText,
                 baseFont: font,
@@ -420,6 +422,16 @@ struct OutlineTextField: NSViewRepresentable {
 
     class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: OutlineTextField
+
+        private static let boldMarkdownRegex = try? NSRegularExpression(
+            pattern: "\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*"
+        )
+        private static let highlightMarkdownRegex = try? NSRegularExpression(
+            pattern: "==(?=\\S)(.+?)(?<=\\S)=="
+        )
+        private static let italicMarkdownRegex = try? NSRegularExpression(
+            pattern: "(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)"
+        )
 
         init(parent: OutlineTextField) {
             self.parent = parent
@@ -650,21 +662,21 @@ struct OutlineTextField: NSViewRepresentable {
             guard let storage = editor.textStorage else { return false }
             var changed = false
             changed = convertMarkdownPattern(
-                "\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*",
+                boldMarkdownRegex,
                 markerLength: 2,
                 kind: .bold,
                 in: editor,
                 storage: storage
             ) || changed
             changed = convertMarkdownPattern(
-                "==(?=\\S)(.+?)(?<=\\S)==",
+                highlightMarkdownRegex,
                 markerLength: 2,
                 kind: .highlight,
                 in: editor,
                 storage: storage
             ) || changed
             changed = convertMarkdownPattern(
-                "(?<!\\*)\\*(?![\\s*])(.+?)(?<![\\s*])\\*(?!\\*)",
+                italicMarkdownRegex,
                 markerLength: 1,
                 kind: .italic,
                 in: editor,
@@ -674,13 +686,13 @@ struct OutlineTextField: NSViewRepresentable {
         }
 
         private static func convertMarkdownPattern(
-            _ pattern: String,
+            _ regex: NSRegularExpression?,
             markerLength: Int,
             kind: TextFormattingKind,
             in editor: NSTextView,
             storage: NSMutableAttributedString
         ) -> Bool {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            guard let regex else { return false }
             let text = storage.string
             let nsText = text as NSString
             let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
