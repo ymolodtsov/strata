@@ -612,6 +612,13 @@ struct StrataApp: App {
 
                 Divider()
 
+                Button("Insert Date") {
+                    insertCurrentDate()
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                Divider()
+
                 Button("Select All") {
                     performSelectAll()
                 }
@@ -913,6 +920,11 @@ struct StrataApp: App {
         } else {
             activeStore?.pasteAfterSelection()
         }
+    }
+
+    private func insertCurrentDate() {
+        guard let field = StrataTextField.currentEditingField else { return }
+        field.insertDateString(StrataTextField.localizedCurrentDateString())
     }
 
     private func performSelectAll() {

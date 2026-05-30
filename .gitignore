@@ -1,5 +1,8 @@
 .DS_Store
 .claude/
+AGENTS.md
+agents.md
+todo.md
 DerivedData/
 build/
 release/

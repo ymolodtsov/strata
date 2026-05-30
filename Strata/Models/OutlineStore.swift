@@ -231,9 +231,8 @@ class OutlineStore {
     }
 
     var breadcrumbs: [(id: UUID, text: String)] {
-        // Walk parent chain from currentRoot up to the synthetic OPML root.
-        // The root is document metadata rather than a visible outline node, so
-        // breadcrumbs should start at the first real outline item.
+        // Keep a document-level crumb first so focus mode always has an obvious
+        // way back to the full outline, then append the visible node path.
         var chain: [OutlineNode] = []
         var node: OutlineNode? = currentRoot
         while let n = node {
@@ -242,7 +241,7 @@ class OutlineStore {
             node = n.parent
         }
         chain.reverse()
-        return chain.map { n in
+        return [(id: root.id, text: documentTitle)] + chain.map { n in
             let label = n.text.isEmpty ? "Untitled" : n.text
             return (id: n.id, text: label)
         }

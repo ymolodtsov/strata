@@ -178,12 +178,15 @@ struct OutlineTextField: NSViewRepresentable {
                 textWasReplaced = true
             }
 
-            // Skip restyling if text and state haven't changed since last restyle
-            if !textWasReplaced &&
-               tf.lastStyledText == storage.string &&
-               tf.lastStyledFormatting == currentFormatting &&
-               tf.lastStyledDone == isDone &&
-               tf.lastStyledSearch == searchQ {
+            // Plain typing already mutates the field editor in place. Avoid
+            // replacing editor storage from SwiftUI's update pass unless external
+            // content, formatting, completion state, or search highlighting changed.
+            if !textWasReplaced,
+               tf.lastStyledFormatting == currentFormatting,
+               tf.lastStyledDone == isDone,
+               tf.lastStyledSearch == searchQ,
+               searchQ.isEmpty {
+                tf.lastStyledText = storage.string
                 return
             }
 
@@ -232,23 +235,12 @@ struct OutlineTextField: NSViewRepresentable {
                 tf.lastStyledDone != isDone ||
                 tf.lastStyledSearch != searchQ
 
-            let styled: NSAttributedString
-            if isDone {
-                styled = Self.styledAttributedString(
-                    from: currentText,
-                    baseFont: font,
-                    baseColor: baseColor,
-                    formatting: [],
-                    isDone: true
-                )
-            } else {
-                styled = Self.styledAttributedString(
-                    from: currentText, baseFont: font,
-                    baseColor: baseColor,
-                    formatting: currentFormatting,
-                    isDone: false
-                )
-            }
+            let styled = Self.styledAttributedString(
+                from: currentText,
+                baseFont: font,
+                baseColor: baseColor,
+                formatting: currentFormatting
+            )
 
             if !searchQ.isEmpty {
                 let mutable = NSMutableAttributedString(attributedString: styled)
@@ -275,16 +267,13 @@ struct OutlineTextField: NSViewRepresentable {
         from text: String,
         baseFont: NSFont,
         baseColor: NSColor,
-        formatting: [TextFormattingSpan],
-        isDone: Bool = false
+        formatting: [TextFormattingSpan]
     ) -> NSAttributedString {
         let attributed = NSMutableAttributedString(
             string: text,
             attributes: [.font: baseFont, .foregroundColor: baseColor, .paragraphStyle: paragraphStyle]
         )
-        if !isDone {
-            applyFormatting(formatting, to: attributed, baseFont: baseFont)
-        }
+        applyFormatting(formatting, to: attributed, baseFont: baseFont)
         applyDetectedLinks(to: attributed)
         return attributed
     }
@@ -302,8 +291,7 @@ struct OutlineTextField: NSViewRepresentable {
             from: text,
             baseFont: baseFont,
             baseColor: baseColor,
-            formatting: formatting,
-            isDone: isDone
+            formatting: formatting
         ))
         if !searchQuery.isEmpty {
             applySearchHighlight(to: attributed, query: searchQuery)
@@ -492,8 +480,7 @@ struct OutlineTextField: NSViewRepresentable {
             parent.text = newValue
             parent.formatting = newFormatting
             parent.onTextChange()
-            tf.invalidateMeasurementCache()
-            tf.invalidateIntrinsicContentSize()
+            tf.invalidateIntrinsicSizeIfMeasuredHeightChanged()
 
             // Plain typing already updates the field editor's attributed storage.
             // Full restyling is only needed when markdown markers were converted,
@@ -770,6 +757,16 @@ struct OutlineTextField: NSViewRepresentable {
 class StrataTextField: NSTextField {
     static weak var currentEditingField: StrataTextField?
 
+    static func localizedCurrentDateString() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.calendar = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: Date())
+    }
+
     private var lastKnownWidth: CGFloat = 0
     private var programmaticStyleDepth = 0
     private(set) var pendingStructuralUndoCount = 0
@@ -865,6 +862,21 @@ class StrataTextField: NSTextField {
     func invalidateMeasurementCache() {
         cachedMeasureSignature = ""
         cachedMeasureHeight = 0
+    }
+
+    func invalidateIntrinsicSizeIfMeasuredHeightChanged() {
+        let width = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : bounds.width
+        guard width > 0 else {
+            invalidateMeasurementCache()
+            invalidateIntrinsicContentSize()
+            return
+        }
+
+        let previousHeight = cachedMeasureHeight
+        let nextHeight = measuredTextHeight(for: width)
+        if previousHeight == 0 || abs(previousHeight - nextHeight) >= 0.5 {
+            invalidateIntrinsicContentSize()
+        }
     }
 
     private func measurementSignature(for attributed: NSAttributedString) -> String {
@@ -1082,6 +1094,12 @@ class StrataTextField: NSTextField {
     @objc func wrapBold() { toggleFormatting(.bold) }
     @objc func wrapItalic() { toggleFormatting(.italic) }
     @objc func wrapHighlight() { toggleFormatting(.highlight) }
+
+    func insertDateString(_ dateString: String) {
+        guard let editor = currentEditor() else { return }
+        editor.insertText(dateString)
+    }
+
     @objc func editLink() {
         guard let editor = currentEditor() as? NSTextView,
               let storage = editor.textStorage else { return }
@@ -1292,6 +1310,11 @@ class StrataTextField: NSTextField {
         // Cmd+L — Highlight
         if event.keyCode == 37 && flags == .command {
             wrapHighlight()
+            return true
+        }
+        // Cmd+Shift+D — insert current date using the user's system format
+        if event.keyCode == 2 && flags == [.command, .shift] {
+            insertDateString(Self.localizedCurrentDateString())
             return true
         }
         // Cmd+K — add or edit link
