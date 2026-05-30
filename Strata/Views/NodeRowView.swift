@@ -154,6 +154,7 @@ struct NodeRowView: View {
                     onDelete: { store.deleteNode(nodeId: node.id) },
                     onMergeWithPrevious: { store.mergeWithPrevious(nodeId: node.id) },
                     onToggleDone: { store.toggleDone(nodeId: node.id) },
+                    onToggleNote: { store.toggleNote(nodeId: node.id) },
                     onMoveNodeUp: { store.moveUp(nodeId: node.id) },
                     onMoveNodeDown: { store.moveDown(nodeId: node.id) },
                     onZoomIn: { store.zoomIn(nodeId: node.id) },
@@ -544,6 +545,22 @@ struct NoteEditorView: View {
             .padding(.trailing, 8)
         }
         .padding(.bottom, 2)
+        .onAppear {
+            focusIfRequested()
+        }
+        .onChange(of: store.pendingNoteFocusId) { _, _ in
+            focusIfRequested()
+        }
+    }
+
+    private func focusIfRequested() {
+        guard store.pendingNoteFocusId == node.id else { return }
+        DispatchQueue.main.async {
+            isFocused = true
+            if store.pendingNoteFocusId == node.id {
+                store.pendingNoteFocusId = nil
+            }
+        }
     }
 }
 

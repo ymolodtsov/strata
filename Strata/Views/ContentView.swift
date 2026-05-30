@@ -150,7 +150,7 @@ struct ContentView: View {
             }
             // Cmd+Shift+Enter — Toggle note on focused node
             if event.keyCode == 36 && flags == [.command, .shift] {
-                if let focusedId = store.pendingFocusId ?? store.visibleNodes().first?.node.id {
+                if let focusedId = StrataTextField.currentEditingField?.nodeId ?? store.noteToggleFallbackNodeId {
                     store.toggleNote(nodeId: focusedId)
                 }
                 return nil

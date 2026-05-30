@@ -972,13 +972,26 @@ class OutlineStore {
     // MARK: - Notes
 
     var editingNoteId: UUID?
+    var pendingNoteFocusId: UUID?
 
     func toggleNote(nodeId: UUID) {
         if editingNoteId == nodeId {
             editingNoteId = nil
+            pendingNoteFocusId = nil
         } else {
             editingNoteId = nodeId
+            pendingNoteFocusId = nodeId
         }
+    }
+
+    var noteToggleFallbackNodeId: UUID? {
+        if let pendingFocusId {
+            return pendingFocusId
+        }
+        if let selectionCursorId, selectedNodeIds.contains(selectionCursorId) {
+            return selectionCursorId
+        }
+        return visibleNodes().first?.node.id
     }
 
     // MARK: - Settings

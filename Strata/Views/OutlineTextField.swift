@@ -17,6 +17,7 @@ struct OutlineTextField: NSViewRepresentable {
     var onDelete: () -> Void
     var onMergeWithPrevious: () -> Void
     var onToggleDone: () -> Void
+    var onToggleNote: () -> Void
     var onMoveNodeUp: () -> Bool
     var onMoveNodeDown: () -> Bool
     var onZoomIn: () -> Void
@@ -65,6 +66,7 @@ struct OutlineTextField: NSViewRepresentable {
         tf.usesSingleLineMode = false
         tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tf.delegate = context.coordinator
+        tf.nodeId = nodeId
         tf.placeholderAttributedString = NSAttributedString(
             string: "...",
             attributes: [
@@ -73,6 +75,7 @@ struct OutlineTextField: NSViewRepresentable {
             ]
         )
         tf.onCmdEnter = { context.coordinator.parent.onToggleDone() }
+        tf.onCmdShiftEnter = { context.coordinator.parent.onToggleNote() }
         tf.onCmdShiftUp = { context.coordinator.parent.onMoveNodeUp() }
         tf.onCmdShiftDown = { context.coordinator.parent.onMoveNodeDown() }
         tf.onSelectAllNodes = { context.coordinator.parent.onSelectAllNodes() }
@@ -123,8 +126,10 @@ struct OutlineTextField: NSViewRepresentable {
 
     func updateNSView(_ nsView: StrataTextField, context: Context) {
         context.coordinator.parent = self
+        nsView.nodeId = nodeId
 
         nsView.onCmdEnter = { onToggleDone() }
+        nsView.onCmdShiftEnter = { onToggleNote() }
         nsView.onCmdShiftUp = { onMoveNodeUp() }
         nsView.onCmdShiftDown = { onMoveNodeDown() }
         nsView.onSelectAllNodes = { onSelectAllNodes() }
@@ -770,6 +775,7 @@ struct OutlineTextField: NSViewRepresentable {
 
 class StrataTextField: NSTextField {
     static weak var currentEditingField: StrataTextField?
+    var nodeId: UUID?
 
     static func localizedCurrentDateString() -> String {
         let formatter = DateFormatter()
@@ -928,6 +934,7 @@ class StrataTextField: NSTextField {
     }
 
     var onCmdEnter: (() -> Void)?
+    var onCmdShiftEnter: (() -> Void)?
     var onCmdShiftUp: (() -> Bool)?
     var onCmdShiftDown: (() -> Bool)?
     var onSelectAllNodes: (() -> Void)?
@@ -1332,6 +1339,11 @@ class StrataTextField: NSTextField {
         if event.keyCode == 36 && flags == .command {
             markStructuralEditForUndo()
             onCmdEnter?()
+            return true
+        }
+        // Cmd+Shift+Enter — toggle note for the row being edited
+        if event.keyCode == 36 && flags == [.command, .shift] {
+            onCmdShiftEnter?()
             return true
         }
         // Cmd+B — Bold (fallback if Format menu doesn't intercept)
