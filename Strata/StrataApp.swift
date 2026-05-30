@@ -643,7 +643,7 @@ struct StrataApp: App {
                 Menu("Open Recent") {
                     let urls = recentFiles.urls
                     ForEach(urls, id: \.self) { url in
-                        Button(url.deletingPathExtension().lastPathComponent) {
+                        Button(OutlineStore.displayName(for: url)) {
                             openURLAsTab(url)
                         }
                         .help(url.path)

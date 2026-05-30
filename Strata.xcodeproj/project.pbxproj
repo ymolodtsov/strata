@@ -255,7 +255,7 @@
 				CODE_SIGN_ENTITLEMENTS = Strata/Resources/Strata.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Strata/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -281,7 +281,7 @@
 				CODE_SIGN_ENTITLEMENTS = Strata/Resources/Strata.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Strata/Resources/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

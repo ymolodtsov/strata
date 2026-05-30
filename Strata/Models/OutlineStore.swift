@@ -156,7 +156,11 @@ class OutlineStore {
     var documentTitle: String {
         guard let url = currentFilePath else { return untitledDisplayName ?? "Untitled" }
         if url == Self.defaultFileURL { return "Strata" }
-        return url.lastPathComponent
+        return Self.displayName(for: url)
+    }
+
+    static func displayName(for url: URL) -> String {
+        FileManager.default.displayName(atPath: url.path)
     }
 
     var shouldPromptToSaveBeforeClosing: Bool {

@@ -367,7 +367,7 @@ struct WindowConfigurator: NSViewRepresentable {
                 if let url {
                     window.representedURL = url
                     window.representedFilename = url.path
-                    window.title = url.lastPathComponent
+                    window.title = OutlineStore.displayName(for: url)
                 } else {
                     window.representedURL = nil
                     window.representedFilename = ""
