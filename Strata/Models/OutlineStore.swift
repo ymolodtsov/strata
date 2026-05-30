@@ -1106,10 +1106,12 @@ class OutlineStore {
         }
 
         if dropAsChild {
+            let insertAtTop = target.isExpanded
             target.isExpanded = true
-            for node in topLevel {
+            let insertionIndex = insertAtTop ? 0 : target.children.count
+            for (offset, node) in topLevel.enumerated() {
                 node.parent = target
-                target.children.append(node)
+                target.children.insert(node, at: min(insertionIndex + offset, target.children.count))
             }
         } else {
             guard let targetParent = target.parent,

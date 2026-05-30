@@ -235,8 +235,6 @@ struct OutlineTextField: NSViewRepresentable {
                 tf.lastStyledDone != isDone ||
                 tf.lastStyledSearch != searchQ
 
-            guard shouldInvalidateSize else { return }
-
             let styled = Self.styledAttributedString(
                 from: currentText,
                 baseFont: font,

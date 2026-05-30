@@ -151,6 +151,21 @@ enum SessionState {
         windowStores[ObjectIdentifier(window)] = WindowStoreRef(window: window, store: store)
     }
 
+    static func store(for window: NSWindow?) -> OutlineStore? {
+        cleanupWindowStores()
+        if let window,
+           let store = windowStores[ObjectIdentifier(window)]?.store {
+            return store
+        }
+        return nil
+    }
+
+    static func bestActiveStore() -> OutlineStore? {
+        store(for: NSApp.keyWindow) ??
+        store(for: NSApp.mainWindow) ??
+        NSApp.windows.lazy.compactMap { windowStores[ObjectIdentifier($0)]?.store }.first
+    }
+
     /// Collect file paths from all living OutlineStore instances and save to UserDefaults.
     static func saveOpenDocuments() {
         let urls = orderedOpenDocumentURLs()
@@ -953,24 +968,26 @@ struct StrataApp: App {
 
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
     private func openURLAsTab(_ url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else {
+        let fileURL = url.standardizedFileURL
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
             recentFiles.refresh()
             NSSound.beep()
             return
         }
 
-        recentFiles.add(url)
-        if let store = activeStore, store.currentFilePath == nil {
+        recentFiles.add(fileURL)
+        let targetStore = activeStore ?? SessionState.bestActiveStore()
+        if let store = targetStore, store.currentFilePath == nil {
             // Current window is untitled — load into it
-            store.loadFile(from: url)
+            store.loadFile(from: fileURL)
         } else if let openWindow = openWindowAction {
             // Current window has a file — open in a new tab
             WindowTabCoordinator.requestNextWindowAsTab()
-            SessionState.pendingRestoreURLs.append(url)
+            SessionState.pendingRestoreURLs.append(fileURL)
             openWindow(id: "main")
         } else {
-            // Fallback: load into current window
-            activeStore?.loadFile(from: url)
+            // Fallback for menu/native recent paths where SwiftUI focused values are unavailable.
+            SessionState.queueOpenURLs([fileURL])
         }
     }
 
