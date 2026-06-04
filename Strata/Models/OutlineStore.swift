@@ -1419,6 +1419,23 @@ class OutlineStore {
         defaultDirectory.appendingPathComponent("default.opml")
     }
 
+    func renameDocument(to newName: String) {
+        guard let url = currentFilePath else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let ext = url.pathExtension
+        let newFileName = trimmed.hasSuffix(".\(ext)") ? trimmed : "\(trimmed).\(ext)"
+        let newURL = url.deletingLastPathComponent().appendingPathComponent(newFileName)
+        guard newURL != url else { return }
+
+        do {
+            try FileManager.default.moveItem(at: url, to: newURL)
+            currentFilePath = newURL
+            RecentFiles.shared.add(newURL)
+        } catch {}
+    }
+
     func scheduleSave() {
         treeModifiedSinceLastSnapshot = true
         saveWorkItem?.cancel()

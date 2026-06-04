@@ -387,15 +387,113 @@ struct WindowConfigurator: NSViewRepresentable {
             window.delegate = context.coordinator
         }
         window.isDocumentEdited = store.shouldPromptToSaveBeforeClosing
+        context.coordinator.installTitleClickMonitor(for: window)
     }
 
-    final class Coordinator: NSObject, NSWindowDelegate {
+    final class Coordinator: NSObject, NSWindowDelegate, NSPopoverDelegate {
         var store: OutlineStore
         private var isShowingClosePrompt = false
         private var bypassClosePrompt = false
+        private var titleClickMonitor: Any?
+        private var renamePopover: NSPopover?
+        private weak var observedWindow: NSWindow?
 
         init(store: OutlineStore) {
             self.store = store
+        }
+
+        func installTitleClickMonitor(for window: NSWindow) {
+            guard observedWindow !== window else { return }
+            removeTitleClickMonitor()
+            observedWindow = window
+            titleClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self, weak window] event in
+                guard let self, let window,
+                      event.window === window,
+                      event.clickCount == 1,
+                      self.store.currentFilePath != nil,
+                      self.renamePopover == nil else { return event }
+                if self.isClickOnTitleText(event, in: window) {
+                    DispatchQueue.main.async { self.showRenamePopover(in: window) }
+                    return nil
+                }
+                return event
+            }
+        }
+
+        private func removeTitleClickMonitor() {
+            if let monitor = titleClickMonitor {
+                NSEvent.removeMonitor(monitor)
+                titleClickMonitor = nil
+            }
+        }
+
+        private func isClickOnTitleText(_ event: NSEvent, in window: NSWindow) -> Bool {
+            guard let titleTextField = findTitleTextField(in: window) else { return false }
+            let locationInTitleField = titleTextField.convert(event.locationInWindow, from: nil)
+            return titleTextField.bounds.contains(locationInTitleField)
+        }
+
+        private func findTitleTextField(in window: NSWindow) -> NSTextField? {
+            guard let themeFrame = window.contentView?.superview else { return nil }
+            return findTitleView(in: themeFrame, title: window.title)
+        }
+
+        private func findTitleView(in view: NSView, title: String) -> NSTextField? {
+            if let tf = view as? NSTextField,
+               !tf.isEditable,
+               tf.stringValue == title,
+               String(describing: type(of: tf)).contains("Title") {
+                return tf
+            }
+            for subview in view.subviews {
+                if let found = findTitleView(in: subview, title: title) {
+                    return found
+                }
+            }
+            return nil
+        }
+
+        private func showRenamePopover(in window: NSWindow) {
+            guard let url = store.currentFilePath,
+                  let titleField = findTitleTextField(in: window) else { return }
+
+            let currentName = url.deletingPathExtension().lastPathComponent
+
+            let textField = NSTextField(string: currentName)
+            textField.font = .systemFont(ofSize: 13)
+            textField.alignment = .center
+            textField.bezelStyle = .roundedBezel
+            textField.frame = NSRect(x: 12, y: 12, width: 220, height: 24)
+            textField.target = self
+            textField.action = #selector(renameFieldCommitted(_:))
+
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 244, height: 48))
+            container.addSubview(textField)
+
+            let vc = NSViewController()
+            vc.view = container
+
+            let popover = NSPopover()
+            popover.contentViewController = vc
+            popover.behavior = .transient
+            popover.delegate = self
+            self.renamePopover = popover
+
+            popover.show(relativeTo: titleField.bounds, of: titleField, preferredEdge: .maxY)
+
+            window.makeFirstResponder(textField)
+            textField.selectText(nil)
+        }
+
+        @objc private func renameFieldCommitted(_ sender: NSTextField) {
+            let newName = sender.stringValue
+            renamePopover?.performClose(nil)
+            renamePopover = nil
+            store.renameDocument(to: newName)
+        }
+
+        func popoverDidClose(_ notification: Notification) {
+            renamePopover = nil
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -458,6 +556,10 @@ struct WindowConfigurator: NSViewRepresentable {
         func windowDidResize(_ notification: Notification) {
             WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
+
+        deinit {
+            removeTitleClickMonitor()
+        }
     }
 }
 
@@ -467,3 +569,4 @@ final class WindowConfigurationNSView: NSView {
         WindowTabCoordinator.configure(window)
     }
 }
+

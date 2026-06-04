@@ -453,7 +453,7 @@ struct OutlineTextField: NSViewRepresentable {
 
                 StrataTextField.currentEditingField = tf
                 editor.textContainerInset = .zero
-                editor.textContainer?.lineFragmentPadding = 0
+                editor.textContainer?.lineFragmentPadding = 2
                 editor.textContainer?.widthTracksTextView = true
                 editor.isHorizontallyResizable = false
                 editor.isVerticallyResizable = true
@@ -777,6 +777,25 @@ class StrataTextField: NSTextField {
     static weak var currentEditingField: StrataTextField?
     var nodeId: UUID?
 
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result, let editor = currentEditor() as? NSTextView {
+            // The _NSKeyboardFocusClipView positions the field editor slightly
+            // to the left of where the cell draws non-editing text.  A small
+            // lineFragmentPadding compensates so both modes align.
+            editor.textContainerInset = .zero
+            editor.textContainer?.lineFragmentPadding = 2
+            editor.textContainer?.widthTracksTextView = true
+            editor.isHorizontallyResizable = false
+            editor.isVerticallyResizable = true
+        }
+        return result
+    }
+
     static func localizedCurrentDateString() -> String {
         let formatter = DateFormatter()
         formatter.locale = .autoupdatingCurrent
@@ -809,13 +828,9 @@ class StrataTextField: NSTextField {
     private var pendingSelectionUpdate = false
 
     override var intrinsicContentSize: NSSize {
-        if preferredMaxLayoutWidth > 0 {
-            return NSSize(
-                width: NSView.noIntrinsicMetric,
-                height: measuredTextHeight(for: preferredMaxLayoutWidth)
-            )
-        }
-        return super.intrinsicContentSize
+        let width = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : bounds.width
+        let height = width > 0 ? measuredTextHeight(for: width) : 24
+        return NSSize(width: NSView.noIntrinsicMetric, height: height)
     }
 
     func measuredTextHeight(for width: CGFloat) -> CGFloat {
@@ -863,7 +878,7 @@ class StrataTextField: NSTextField {
         let textContainer = NSTextContainer(
             containerSize: NSSize(width: measurementWidth, height: CGFloat.greatestFiniteMagnitude)
         )
-        textContainer.lineFragmentPadding = 0
+        textContainer.lineFragmentPadding = 2
         textContainer.widthTracksTextView = false
         textContainer.heightTracksTextView = false
 
@@ -1409,7 +1424,7 @@ class StrataTextField: NSTextField {
             onZoomIn?()
             return true
         }
-        // Cmd+V — outline-node or multi-line paste creates nodes; single-line text is normal paste
+        // Cmd+V — outline-node or multi-line paste creates nodes; single-line text is plain-text paste
         if event.keyCode == 9 && flags == .command {
             if NSPasteboard.general.data(forType: OutlineStore.nodePasteboardType) != nil {
                 if onPasteNodes?() == true {
@@ -1422,6 +1437,14 @@ class StrataTextField: NSTextField {
                 if onPasteNodes?() == true {
                     markStructuralEditForUndo()
                 }
+                return true
+            }
+            // Single-line paste: insert plain text to avoid foreign rich-text
+            // attributes (fonts, colors, paragraph styles) from other apps
+            // that the formatting model can't represent.
+            if let editor = currentEditor() as? NSTextView,
+               let text = NSPasteboard.general.string(forType: .string) {
+                editor.insertText(text, replacementRange: editor.selectedRange)
                 return true
             }
             return false
