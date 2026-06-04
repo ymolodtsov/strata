@@ -78,6 +78,7 @@ class OutlineStore {
     private struct UndoSnapshot {
         let root: OutlineNode
         let zoomPath: [UUID]
+        let focusedId: UUID?
     }
 
     private var undoStack: [UndoSnapshot] = []
@@ -109,7 +110,7 @@ class OutlineStore {
     }
 
     private func pushUndoSnapshot() {
-        let snap = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath)
+        let snap = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath, focusedId: pendingFocusId)
         undoStack.append(snap)
         if undoStack.count > Self.maxUndoLevels {
             undoStack.removeFirst()
@@ -125,7 +126,7 @@ class OutlineStore {
             pendingStructuralUndoRouteCount -= 1
             pendingStructuralRedoRouteCount += 1
         }
-        let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath)
+        let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath, focusedId: pendingFocusId)
         redoStack.append(current)
         restoreSnapshot(snap)
     }
@@ -136,7 +137,7 @@ class OutlineStore {
             pendingStructuralRedoRouteCount -= 1
             pendingStructuralUndoRouteCount += 1
         }
-        let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath)
+        let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath, focusedId: pendingFocusId)
         undoStack.append(current)
         restoreSnapshot(snap)
     }
@@ -149,7 +150,14 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = false
-        pendingFocusId = currentRoot.children.first?.id
+        // Restore focus to the node that was focused when this snapshot was
+        // taken.  Fall back to the first visible child if that node no longer
+        // exists (e.g. it was deleted).
+        if let savedId = snap.focusedId, root.find(id: savedId) != nil {
+            pendingFocusId = savedId
+        } else {
+            pendingFocusId = currentRoot.children.first?.id
+        }
         save()
     }
 
