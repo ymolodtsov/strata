@@ -18,6 +18,7 @@
 		A10009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10009; };
 		A10010 /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10012; };
 		A10011 /* Strata-Welcome.opml in Resources */ = {isa = PBXBuildFile; fileRef = B10013; };
+		A10012 /* StrataDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10014; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 		B10011 /* Strata.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Strata.entitlements; sourceTree = "<group>"; };
 		B10012 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
 		B10013 /* Strata-Welcome.opml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = "Strata-Welcome.opml"; sourceTree = "<group>"; };
+		B10014 /* StrataDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrataDocument.swift; sourceTree = "<group>"; };
 		B10020 /* Strata.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Strata.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -73,6 +75,7 @@
 			children = (
 				B10002 /* OutlineNode.swift */,
 				B10003 /* OutlineStore.swift */,
+				B10014 /* StrataDocument.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -190,6 +193,7 @@
 				A10007 /* ContentView.swift in Sources */,
 				A10008 /* BreadcrumbView.swift in Sources */,
 			A10010 /* ExportService.swift in Sources */,
+			A10012 /* StrataDocument.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
