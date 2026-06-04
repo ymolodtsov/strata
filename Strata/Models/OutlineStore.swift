@@ -69,6 +69,8 @@ class OutlineStore {
     var untitledDisplayName: String?
     var selectedNodeIds: Set<UUID> = []
 
+    weak var document: StrataDocument?
+
     private var saveWorkItem: DispatchWorkItem?
     private var terminateObserver: Any?
     private var resignObserver: Any?
@@ -1527,13 +1529,13 @@ class OutlineStore {
         RecentFiles.shared.add(url)
     }
 
-    private struct LoadedDocument {
+    struct LoadedDocument {
         let root: OutlineNode
         let savesBackToOriginalURL: Bool
         let displayName: String?
     }
 
-    private static func loadDocument(from url: URL, opmlMode: OPMLService.ParseMode = .standard, savesOPMLBackToOriginal: Bool = true) -> LoadedDocument? {
+    static func loadDocument(from url: URL, opmlMode: OPMLService.ParseMode = .standard, savesOPMLBackToOriginal: Bool = true) -> LoadedDocument? {
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url) else { return nil }
 
@@ -1582,7 +1584,7 @@ class OutlineStore {
         pendingFocusId = root.children.first?.id
     }
 
-    private static func parseOutlineText(_ text: String, title: String, markdown: Bool) -> OutlineNode {
+    static func parseOutlineText(_ text: String, title: String, markdown: Bool) -> OutlineNode {
         var rootTitle = title
         var entries: [(indent: Int, text: String, isDone: Bool)] = []
 
@@ -1677,7 +1679,7 @@ class OutlineStore {
         return nil
     }
 
-    private func ensureEditableRoot() {
+    func ensureEditableRoot() {
         if root.children.isEmpty {
             let empty = OutlineNode(text: "")
             empty.parent = root
