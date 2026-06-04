@@ -45,8 +45,9 @@ struct OutlineTextField: NSViewRepresentable {
 
     static let formattingAttribute = NSAttributedString.Key("family.ma.strata.formattingKind")
     static let manualLinkURLAttribute = NSAttributedString.Key("family.ma.strata.linkURL")
-    private static let linkDetector = try? NSDataDetector(
-        types: NSTextCheckingResult.CheckingType.link.rawValue
+    private static let urlPattern = try? NSRegularExpression(
+        pattern: "https?://[^\\s\\)\\]>\"]+",
+        options: []
     )
 
     func makeCoordinator() -> Coordinator {
@@ -354,20 +355,26 @@ struct OutlineTextField: NSViewRepresentable {
         let fullRange = NSRange(location: 0, length: nsText.length)
         guard fullRange.length > 0 else { return }
 
-        linkDetector?.enumerateMatches(in: text, range: fullRange) { match, _, _ in
+        urlPattern?.enumerateMatches(in: text, range: fullRange) { match, _, _ in
             guard let match,
-                  let url = match.url,
                   match.range.location != NSNotFound,
                   match.range.length > 0,
                   match.range.location + match.range.length <= fullRange.length else { return }
-            let existingKind = attributed.attribute(formattingAttribute, at: match.range.location, effectiveRange: nil) as? String
+            let raw = nsText.substring(with: match.range)
+            let trimmed = raw.replacingOccurrences(
+                of: "[.,;:!?]+$", with: "", options: .regularExpression)
+            guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return }
+            let trimmedFromEnd = (raw as NSString).length - (trimmed as NSString).length
+            let linkRange = NSRange(location: match.range.location,
+                                    length: match.range.length - trimmedFromEnd)
+            let existingKind = attributed.attribute(formattingAttribute, at: linkRange.location, effectiveRange: nil) as? String
             if existingKind == TextFormattingKind.link.rawValue { return }
 
             attributed.addAttributes([
                 .link: url,
                 .foregroundColor: NSColor.linkColor,
                 .underlineStyle: NSUnderlineStyle.single.rawValue
-            ], range: match.range)
+            ], range: linkRange)
         }
     }
 
