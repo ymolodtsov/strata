@@ -17,15 +17,24 @@ enum WindowTabCoordinator {
         guard let window else { return }
         configurePresentation(window)
 
-        guard let parent = requestedParentWindow,
-              parent != window,
-              pendingTabCount > 0,
-              parent.isVisible else { return }
+        guard pendingTabCount > 0 else { return }
+
+        // If the parent window was deallocated or became invisible, reset to avoid drift
+        guard let parent = requestedParentWindow, parent.isVisible else {
+            pendingTabCount = 0
+            requestedParentWindow = nil
+            return
+        }
+        guard parent != window else { return }
 
         let alreadyTabbedWithParent =
             parent.tabGroup?.windows.contains(window) == true ||
             window.tabGroup?.windows.contains(parent) == true
-        guard !alreadyTabbedWithParent else { return }
+        guard !alreadyTabbedWithParent else {
+            pendingTabCount -= 1
+            if pendingTabCount == 0 { requestedParentWindow = nil }
+            return
+        }
 
         window.setFrame(parent.frame, display: false)
         window.alphaValue = 0
@@ -272,8 +281,7 @@ struct DocumentWindowView: View {
             .focusedSceneValue(\.openWindowAction, openWindow)
             .onAppear {
                 // If a StrataDocument was queued for this window, adopt its store.
-                if let pendingDoc = StrataDocumentController.pendingDocuments.first {
-                    StrataDocumentController.pendingDocuments.removeFirst()
+                if let pendingDoc = StrataDocumentController.dequeuePendingDocument() {
                     adoptDocument(pendingDoc)
                 } else if Self.isFirstWindow {
                     Self.isFirstWindow = false
@@ -523,6 +531,11 @@ struct StrataApp: App {
                     performCopy()
                 }
                 .keyboardShortcut("c", modifiers: .command)
+
+                Button("Copy as Markdown") {
+                    copyAsMarkdown()
+                }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
 
                 Button("Paste") {
                     performPaste()
@@ -799,7 +812,7 @@ struct StrataApp: App {
         guard let openWindow = openWindowAction else { return }
         let doc = StrataDocument()
         NSDocumentController.shared.addDocument(doc)
-        StrataDocumentController.pendingDocuments.append(doc)
+        StrataDocumentController.enqueuePendingDocument(doc)
         WindowTabCoordinator.requestNextWindowAsTab()
         openWindow(id: "main")
     }
@@ -842,6 +855,13 @@ struct StrataApp: App {
         } else {
             activeStore?.copySelectedAsText()
         }
+    }
+
+    private func copyAsMarkdown() {
+        guard let store = activeStore else { return }
+        let md = ExportService.markdown(root: store.currentRoot)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(md, forType: .string)
     }
 
     private func performPaste() {
@@ -920,7 +940,7 @@ struct StrataApp: App {
                 doc.fileType = "org.opml.opml"
                 NSDocumentController.shared.addDocument(doc)
                 NSDocumentController.shared.noteNewRecentDocumentURL(fileURL)
-                StrataDocumentController.pendingDocuments.append(doc)
+                StrataDocumentController.enqueuePendingDocument(doc)
                 WindowTabCoordinator.requestNextWindowAsTab()
                 openWindow(id: "main")
             }

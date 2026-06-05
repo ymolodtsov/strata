@@ -13,7 +13,31 @@ class StrataDocumentController: NSDocumentController {
     ///   2. It is pushed onto this queue
     ///   3. `openWindow(id: "main")` is called
     ///   4. DocumentWindowView.onAppear pops the document and uses its store
-    static var pendingDocuments: [StrataDocument] = []
+    private static var _pendingDocuments: [(doc: StrataDocument, timestamp: CFAbsoluteTime)] = []
+
+    static var pendingDocuments: [StrataDocument] {
+        get {
+            // Discard entries older than 5 seconds to prevent stale documents
+            let cutoff = CFAbsoluteTimeGetCurrent() - 5
+            _pendingDocuments.removeAll { $0.timestamp < cutoff }
+            return _pendingDocuments.map(\.doc)
+        }
+        set {
+            // Only used for clearing or direct assignment
+            _pendingDocuments = newValue.map { ($0, CFAbsoluteTimeGetCurrent()) }
+        }
+    }
+
+    static func enqueuePendingDocument(_ doc: StrataDocument) {
+        _pendingDocuments.append((doc, CFAbsoluteTimeGetCurrent()))
+    }
+
+    static func dequeuePendingDocument() -> StrataDocument? {
+        let cutoff = CFAbsoluteTimeGetCurrent() - 5
+        _pendingDocuments.removeAll { $0.timestamp < cutoff }
+        guard !_pendingDocuments.isEmpty else { return nil }
+        return _pendingDocuments.removeFirst().doc
+    }
 
     // MARK: - Factory overrides
 
@@ -47,7 +71,7 @@ class StrataDocumentController: NSDocumentController {
             let doc = try makeDocument(withContentsOf: fileURL, ofType: "org.opml.opml") as! StrataDocument // safe: makeDocument above always returns StrataDocument
             addDocument(doc)
             noteNewRecentDocumentURL(fileURL)
-            Self.pendingDocuments.append(doc)
+            Self.enqueuePendingDocument(doc)
             WindowTabCoordinator.requestNextWindowAsTab()
             openWindow("main")
         } catch {
@@ -60,7 +84,7 @@ class StrataDocumentController: NSDocumentController {
         do {
             let doc = try makeUntitledDocument(ofType: "org.opml.opml") as! StrataDocument // safe: makeUntitledDocument above always returns StrataDocument
             addDocument(doc)
-            Self.pendingDocuments.append(doc)
+            Self.enqueuePendingDocument(doc)
             WindowTabCoordinator.requestNextWindowAsTab()
             openWindow("main")
         } catch {

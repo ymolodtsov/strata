@@ -46,7 +46,7 @@ struct OutlineTextField: NSViewRepresentable {
     static let formattingAttribute = NSAttributedString.Key("family.ma.strata.formattingKind")
     static let manualLinkURLAttribute = NSAttributedString.Key("family.ma.strata.linkURL")
     private static let urlPattern = try? NSRegularExpression(
-        pattern: "https?://[^\\s\\)\\]>\"]+",
+        pattern: "https?://[^\\s\\]>\"]+",
         options: []
     )
 
@@ -68,13 +68,7 @@ struct OutlineTextField: NSViewRepresentable {
         tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tf.delegate = context.coordinator
         tf.nodeId = nodeId
-        tf.placeholderAttributedString = NSAttributedString(
-            string: "...",
-            attributes: [
-                .font: Self.font,
-                .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.45)
-            ]
-        )
+        tf.placeholderString = ""
         tf.onCmdEnter = { context.coordinator.parent.onToggleDone() }
         tf.onCmdShiftEnter = { context.coordinator.parent.onToggleNote() }
         tf.onCmdShiftUp = { context.coordinator.parent.onMoveNodeUp() }
@@ -234,12 +228,13 @@ struct OutlineTextField: NSViewRepresentable {
             tf.invalidateMeasurementCache()
             tf.invalidateIntrinsicContentSize()
         } else {
-            // Not editing — build styled attributed string directly
-            let shouldInvalidateSize =
-                tf.lastStyledText != currentText ||
-                tf.lastStyledFormatting != currentFormatting ||
-                tf.lastStyledDone != isDone ||
-                tf.lastStyledSearch != searchQ
+            // Not editing — skip entirely if nothing changed
+            if tf.lastStyledText == currentText,
+               tf.lastStyledFormatting == currentFormatting,
+               tf.lastStyledDone == isDone,
+               tf.lastStyledSearch == searchQ {
+                return
+            }
 
             let styled = Self.styledAttributedString(
                 from: currentText,
@@ -260,10 +255,8 @@ struct OutlineTextField: NSViewRepresentable {
             tf.lastStyledFormatting = currentFormatting
             tf.lastStyledDone = isDone
             tf.lastStyledSearch = searchQ
-            if shouldInvalidateSize {
-                tf.invalidateMeasurementCache()
-                tf.invalidateIntrinsicContentSize()
-            }
+            tf.invalidateMeasurementCache()
+            tf.invalidateIntrinsicContentSize()
         }
     }
 
@@ -361,8 +354,7 @@ struct OutlineTextField: NSViewRepresentable {
                   match.range.length > 0,
                   match.range.location + match.range.length <= fullRange.length else { return }
             let raw = nsText.substring(with: match.range)
-            let trimmed = raw.replacingOccurrences(
-                of: "[.,;:!?]+$", with: "", options: .regularExpression)
+            let trimmed = Self.trimURLSuffix(raw)
             guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return }
             let trimmedFromEnd = (raw as NSString).length - (trimmed as NSString).length
             let linkRange = NSRange(location: match.range.location,
@@ -376,6 +368,28 @@ struct OutlineTextField: NSViewRepresentable {
                 .underlineStyle: NSUnderlineStyle.single.rawValue
             ], range: linkRange)
         }
+    }
+
+    /// Trim trailing punctuation and unbalanced closing parentheses from a URL match.
+    /// Handles Wikipedia-style URLs like https://en.wikipedia.org/wiki/Strata_(video_game)
+    /// by keeping balanced parens but stripping trailing unbalanced `)`.
+    private static func trimURLSuffix(_ raw: String) -> String {
+        var s = raw
+        // Strip trailing punctuation
+        while let last = s.last, ".,;:!?".contains(last) {
+            s.removeLast()
+        }
+        // Strip trailing unbalanced closing parens
+        while s.hasSuffix(")") {
+            let opens = s.filter { $0 == "(" }.count
+            let closes = s.filter { $0 == ")" }.count
+            if closes > opens {
+                s.removeLast()
+            } else {
+                break
+            }
+        }
+        return s
     }
 
     static func applySearchHighlight(to attributed: NSMutableAttributedString, query: String) {
@@ -821,6 +835,7 @@ class StrataTextField: NSTextField {
     private var cachedMeasureWidth: CGFloat = 0
     private var cachedMeasureSignature = ""
     private var cachedMeasureHeight: CGFloat = 0
+    private var cachedQuickKey: String?
 
     // Style tracking to avoid redundant restyling in updateNSView
     var lastStyledText: String?
@@ -842,6 +857,18 @@ class StrataTextField: NSTextField {
 
     func measuredTextHeight(for width: CGFloat) -> CGFloat {
         let measurementWidth = max(width, 1)
+
+        // Fast path: if width and text haven't changed, return cached height
+        // without copying the attributed string or enumerating attributes.
+        if cachedMeasureHeight > 0,
+           abs(cachedMeasureWidth - measurementWidth) < 0.5,
+           !cachedMeasureSignature.isEmpty {
+            let quickKey = stringValue
+            if cachedQuickKey == quickKey {
+                return cachedMeasureHeight
+            }
+        }
+
         let attributed: NSMutableAttributedString
 
         if let editor = currentEditor() as? NSTextView, let storage = editor.textStorage {
@@ -861,6 +888,7 @@ class StrataTextField: NSTextField {
         let signature = measurementSignature(for: attributed)
         if abs(cachedMeasureWidth - measurementWidth) < 0.5,
            cachedMeasureSignature == signature {
+            cachedQuickKey = stringValue
             return cachedMeasureHeight
         }
 
@@ -898,12 +926,14 @@ class StrataTextField: NSTextField {
         cachedMeasureWidth = measurementWidth
         cachedMeasureSignature = signature
         cachedMeasureHeight = height
+        cachedQuickKey = stringValue
         return height
     }
 
     func invalidateMeasurementCache() {
         cachedMeasureSignature = ""
         cachedMeasureHeight = 0
+        cachedQuickKey = nil
     }
 
     func invalidateIntrinsicSizeIfMeasuredHeightChanged() {
