@@ -3,7 +3,6 @@ import AppKit
 import UniformTypeIdentifiers
 
 private enum OutlineLayoutMetrics {
-    static let outlineCoordinateSpace = "StrataOutlineRows"
     static let indentWidth: CGFloat = 24
     static let controlHeight: CGFloat = 26
     static let checkboxWidth: CGFloat = 20
@@ -18,14 +17,6 @@ private enum OutlineLayoutMetrics {
     static let controlTopOffset: CGFloat = -2
     static let textTopOffset: CGFloat = 1
     static let rowVerticalPadding: CGFloat = 2
-
-    static func guideX(forDepth depth: Int) -> CGFloat {
-        CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + (bulletWidth / 2)
-    }
-
-    static func dotCenterY(in frame: CGRect) -> CGFloat {
-        frame.minY + rowVerticalPadding + (controlHeight / 2) + controlTopOffset
-    }
 
     static func textLeading(forDepth depth: Int) -> CGFloat {
         CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + bulletWidth + textGap
@@ -329,138 +320,6 @@ struct NodeRowView: View {
     }
 }
 
-private struct RowFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGRect] = [:]
-
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-private extension NodeRowView {
-    var rowFramePreference: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: RowFramePreferenceKey.self,
-                value: [node.id: proxy.frame(in: .named(OutlineLayoutMetrics.outlineCoordinateSpace))]
-            )
-        }
-    }
-}
-
-private struct HierarchyGuideOverlay: Shape {
-    let segments: [HierarchyGuideSegment]
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-
-        for segment in segments {
-            path.move(to: CGPoint(x: segment.x, y: segment.startY))
-            path.addLine(to: CGPoint(x: segment.x, y: segment.endY))
-        }
-
-        return path
-    }
-}
-
-private struct HierarchyGuideSegment: Sendable, Equatable {
-    let x: CGFloat
-    let startY: CGFloat
-    let endY: CGFloat
-}
-
-private enum HierarchyGuideLayout {
-    private struct FramedGuideItem {
-        let item: VisibleItem
-        let frame: CGRect
-    }
-
-    static func segments(items: [VisibleItem], rowFrames: [UUID: CGRect]) -> [HierarchyGuideSegment] {
-        guard items.count > 1, !rowFrames.isEmpty else { return [] }
-
-        let framedItems = items.compactMap { item -> FramedGuideItem? in
-            guard let frame = rowFrames[item.id] else { return nil }
-            return FramedGuideItem(item: item, frame: frame)
-        }
-
-        guard framedItems.count > 1 else { return [] }
-
-        let maxDepth = framedItems.map(\.item.depth).max() ?? 0
-        guard maxDepth > 0 else { return [] }
-
-        var segments: [HierarchyGuideSegment] = []
-        segments.reserveCapacity(framedItems.count / 2)
-
-        for guideDepth in 0..<maxDepth {
-            var index = framedItems.startIndex
-
-            while index < framedItems.endIndex {
-                var startY: CGFloat?
-
-                while index < framedItems.endIndex {
-                    let current = framedItems[index]
-                    let currentDepth = current.item.depth
-
-                    if currentDepth > guideDepth {
-                        startY = current.frame.minY - 1
-                        break
-                    }
-
-                    if currentDepth == guideDepth,
-                       current.item.node.isExpanded,
-                       index + 1 < framedItems.endIndex,
-                       framedItems[index + 1].item.depth > guideDepth {
-                        startY = OutlineLayoutMetrics.dotCenterY(in: current.frame) + (OutlineLayoutMetrics.bulletSize / 2) + 6
-                        index += 1
-                        break
-                    }
-
-                    index += 1
-                }
-
-                guard let startY else { break }
-
-                var lastVisibleDescendant: FramedGuideItem?
-                while index < framedItems.endIndex {
-                    let current = framedItems[index]
-                    guard current.item.depth > guideDepth else { break }
-                    lastVisibleDescendant = current
-                    index += 1
-                }
-
-                guard let lastVisibleDescendant else { continue }
-
-                let x = OutlineLayoutMetrics.guideX(forDepth: guideDepth)
-                let endY = lastVisibleDescendant.frame.maxY - 4
-                guard endY > startY else { continue }
-
-                segments.append(HierarchyGuideSegment(x: x, startY: startY, endY: endY))
-            }
-        }
-
-        return segments
-    }
-
-    static func framesAreVisuallyEqual(_ lhs: [UUID: CGRect], _ rhs: [UUID: CGRect]) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-
-        for (id, leftFrame) in lhs {
-            guard let rightFrame = rhs[id],
-                  leftFrame.isVisuallyEqual(to: rightFrame) else { return false }
-        }
-
-        return true
-    }
-}
-
-private extension CGRect {
-    func isVisuallyEqual(to other: CGRect, tolerance: CGFloat = 0.5) -> Bool {
-        abs(minX - other.minX) < tolerance &&
-        abs(minY - other.minY) < tolerance &&
-        abs(width - other.width) < tolerance &&
-        abs(height - other.height) < tolerance
-    }
-}
 
 private extension View {
     @ViewBuilder
