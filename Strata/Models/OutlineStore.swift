@@ -16,10 +16,6 @@ class OutlineStore {
         .plainText
     ]
 
-    /// Weak set of all living OutlineStore instances, used to collect open document
-    /// paths for session state persistence on quit.
-    static let openStores = NSHashTable<OutlineStore>.weakObjects()
-
     private struct ClipboardPayload: Codable {
         let nodes: [ClipboardNode]
     }
@@ -170,12 +166,10 @@ class OutlineStore {
             OutlineNode(text: "")
         ])
         root.children.first?.parent = root
-        Self.openStores.add(self)
     }
 
     init(root: OutlineNode) {
         self.root = root
-        Self.openStores.add(self)
     }
 
     var hasSelection: Bool { !selectedNodeIds.isEmpty }
@@ -1392,7 +1386,7 @@ class OutlineStore {
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
         pendingFocusId = root.children.first?.id
-        RecentFiles.shared.add(url)
+        NSDocumentController.shared.noteNewRecentDocumentURL(url)
     }
 
     struct LoadedDocument {

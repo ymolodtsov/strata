@@ -254,143 +254,6 @@ extension FocusedValues {
     }
 }
 
-// MARK: - Recent Files
-
-@Observable
-class RecentFiles {
-    static let shared = RecentFiles()
-    private static let defaultsKey = "recentDocumentPaths"
-    private static let maxItems = 12
-
-    private(set) var urls: [URL] = []
-
-    init() {
-        refresh()
-    }
-
-    func refresh() {
-        urls = Self.loadPersistedURLs()
-        mergeNativeRecentDocuments()
-    }
-
-    func add(_ url: URL) {
-        let standardizedURL = url.standardizedFileURL
-        NSDocumentController.shared.noteNewRecentDocumentURL(standardizedURL)
-        urls.removeAll { $0.standardizedFileURL.path == standardizedURL.path }
-        urls.insert(standardizedURL, at: 0)
-        pruneAndPersist()
-    }
-
-    func clear() {
-        NSDocumentController.shared.clearRecentDocuments(nil)
-        urls = []
-        UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
-    }
-
-    private static func loadPersistedURLs() -> [URL] {
-        let paths = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
-        return paths
-            .map { URL(fileURLWithPath: $0).standardizedFileURL }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
-    }
-
-    private func mergeNativeRecentDocuments() {
-        var merged = urls
-        for url in NSDocumentController.shared.recentDocumentURLs.map(\.standardizedFileURL) {
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            if !merged.contains(where: { $0.path == url.path }) {
-                merged.append(url)
-            }
-        }
-        urls = merged
-        pruneAndPersist()
-    }
-
-    private func pruneAndPersist() {
-        var seen = Set<String>()
-        urls = urls
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
-            .filter { seen.insert($0.standardizedFileURL.path).inserted }
-        if urls.count > Self.maxItems {
-            urls = Array(urls.prefix(Self.maxItems))
-        }
-        UserDefaults.standard.set(urls.map(\.path), forKey: Self.defaultsKey)
-    }
-}
-
-// MARK: - Launch Open Panel
-
-/// Shows a native NSOpenPanel with a "New Document" button in the button bar,
-/// matching the standard DocumentGroup first-launch experience.
-class LaunchPanelHelper: NSObject {
-    private let panel: NSOpenPanel
-    private var newDocButton: NSButton?
-    private(set) var didClickNew = false
-
-    init(panel: NSOpenPanel) {
-        self.panel = panel
-        super.init()
-    }
-
-    @objc func injectButton() {
-        guard let contentView = panel.contentView else { return }
-
-        let button = NSButton(title: "New Document", target: self, action: #selector(newDocClicked))
-        button.bezelStyle = .rounded
-        button.translatesAutoresizingMaskIntoConstraints = false
-        self.newDocButton = button
-
-        // Find the Cancel button's superview (the native button bar)
-        if let cancelButton = Self.findButton(titled: "Cancel", in: contentView),
-           let buttonBar = cancelButton.superview {
-            buttonBar.addSubview(button)
-            NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(equalTo: buttonBar.leadingAnchor, constant: 20),
-                button.centerYAnchor.constraint(equalTo: cancelButton.centerYAnchor)
-            ])
-        }
-    }
-
-    @objc private func newDocClicked() {
-        didClickNew = true
-        panel.cancel(nil)
-    }
-
-    private static func findButton(titled title: String, in view: NSView) -> NSButton? {
-        if let button = view as? NSButton, button.title == title {
-            return button
-        }
-        for subview in view.subviews {
-            if let found = findButton(titled: title, in: subview) {
-                return found
-            }
-        }
-        return nil
-    }
-}
-
-/// Returns the URL the user chose, or nil if they want a new document (or cancelled).
-func showLaunchOpenPanel() -> URL? {
-    let panel = NSOpenPanel()
-    panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
-    panel.allowsMultipleSelection = false
-    panel.canChooseDirectories = false
-
-    let helper = LaunchPanelHelper(panel: panel)
-    // Schedule button injection for after the panel's view hierarchy is built
-    helper.perform(#selector(LaunchPanelHelper.injectButton), with: nil, afterDelay: 0)
-
-    let result = panel.runModal()
-
-    if helper.didClickNew {
-        return nil
-    }
-    if result == .OK, let url = panel.url {
-        return url
-    }
-    return nil
-}
-
 // MARK: - Document Window
 
 struct DocumentWindowView: View {
@@ -491,18 +354,8 @@ struct DocumentWindowView: View {
             return
         }
 
-        // No saved session — hide the placeholder window and show the native open panel.
-        let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
-        window?.orderOut(nil)
-
-        if let url = showLaunchOpenPanel() {
-            store.loadFile(from: url)
-            wrapStoreInDocument(url: url)
-            window?.makeKeyAndOrderFront(nil)
-        } else if let window {
-            SessionState.forgetAndSave(window: window)
-            window.close()
-        }
+        // No saved session — start with an empty untitled document.
+        wrapStoreInDocument()
     }
 
     private func openQueuedURLs() {
@@ -545,9 +398,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = StrataDocumentController()
     }
 
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        // Let DocumentWindowView handle first-launch logic (session restore, welcome doc).
+        // Returning false prevents NSDocumentController from creating its own untitled doc.
+        false
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Keep tab creation under Strata's Cmd-T/menu flow until the app moves to
-        // DocumentGroup/NSDocument.
+        // Tab creation is managed by Strata's own Cmd-T/menu flow via StrataDocumentController.
         NSWindow.allowsAutomaticWindowTabbing = false
 
         // Save session state when the app loses focus (covers force-quit scenarios)
@@ -610,7 +468,6 @@ struct StrataApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @FocusedValue(\.activeStore) var activeStore
     @FocusedValue(\.openWindowAction) var openWindowAction
-    @State private var recentFiles = RecentFiles.shared
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -705,7 +562,7 @@ struct StrataApp: App {
                 }
 
                 Menu("Open Recent") {
-                    let urls = recentFiles.urls
+                    let urls = NSDocumentController.shared.recentDocumentURLs
                     ForEach(urls, id: \.self) { url in
                         Button(OutlineStore.displayName(for: url)) {
                             openURLAsTab(url)
@@ -716,7 +573,7 @@ struct StrataApp: App {
                         Divider()
                     }
                     Button("Clear Menu") {
-                        recentFiles.clear()
+                        NSDocumentController.shared.clearRecentDocuments(nil)
                     }
                     .disabled(urls.isEmpty)
                 }
@@ -935,10 +792,9 @@ struct StrataApp: App {
             return
         }
 
-        if let openWindow = openWindowAction {
-            WindowTabCoordinator.requestNextWindowAsTab()
-            openWindow(id: "main")
-        }
+        guard let openWindow = openWindowAction else { return }
+        let controller = NSDocumentController.shared as! StrataDocumentController
+        controller.openUntitledDocumentAsTab { id in openWindow(id: id) }
     }
 
     private func duplicateActiveDocument() {
@@ -1033,23 +889,21 @@ struct StrataApp: App {
     private func openURLAsTab(_ url: URL) {
         let fileURL = url.standardizedFileURL
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            recentFiles.refresh()
             NSSound.beep()
             return
         }
 
-        recentFiles.add(fileURL)
         let targetStore = activeStore ?? SessionState.bestActiveStore()
         if let store = targetStore, store.document?.fileURL == nil {
             // Current window is untitled -- load into it
             store.loadFile(from: fileURL)
             store.document?.fileURL = fileURL
             store.document?.fileType = "org.opml.opml"
+            NSDocumentController.shared.noteNewRecentDocumentURL(fileURL)
         } else if let openWindow = openWindowAction {
-            // Current window has a file — open in a new tab
-            WindowTabCoordinator.requestNextWindowAsTab()
-            SessionState.pendingRestoreURLs.append(fileURL)
-            openWindow(id: "main")
+            // Current window has a file — open in a new tab via document controller
+            let controller = NSDocumentController.shared as! StrataDocumentController
+            controller.openDocumentAsTab(at: fileURL) { id in openWindow(id: id) }
         } else {
             // Fallback for menu/native recent paths where SwiftUI focused values are unavailable.
             SessionState.queueOpenURLs([fileURL])

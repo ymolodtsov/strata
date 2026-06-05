@@ -29,4 +29,42 @@ class StrataDocumentController: NSDocumentController {
         doc.fileType = typeName
         return doc
     }
+
+    // MARK: - Tab-aware document opening
+
+    /// Opens a document from a URL and presents it as a tab in the current window.
+    /// If the document is already open, brings its window to front instead.
+    func openDocumentAsTab(at url: URL, using openWindow: @escaping (String) -> Void) {
+        let fileURL = url.standardizedFileURL
+
+        // Check if this document is already open
+        if let existingDoc = documents.first(where: { $0.fileURL?.standardizedFileURL == fileURL }) as? StrataDocument {
+            existingDoc.showWindows()
+            return
+        }
+
+        do {
+            let doc = try makeDocument(withContentsOf: fileURL, ofType: "org.opml.opml") as! StrataDocument
+            addDocument(doc)
+            noteNewRecentDocumentURL(fileURL)
+            Self.pendingDocuments.append(doc)
+            WindowTabCoordinator.requestNextWindowAsTab()
+            openWindow("main")
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    /// Creates an untitled document and opens it as a tab in the current window.
+    func openUntitledDocumentAsTab(using openWindow: @escaping (String) -> Void) {
+        do {
+            let doc = try makeUntitledDocument(ofType: "org.opml.opml") as! StrataDocument
+            addDocument(doc)
+            Self.pendingDocuments.append(doc)
+            WindowTabCoordinator.requestNextWindowAsTab()
+            openWindow("main")
+        } catch {
+            NSSound.beep()
+        }
+    }
 }
