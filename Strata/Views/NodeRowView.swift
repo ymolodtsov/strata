@@ -234,7 +234,6 @@ struct NodeRowView: View {
         }
         .padding(.vertical, OutlineLayoutMetrics.rowVerticalPadding)
         .padding(.trailing, 8)
-        .background(rowFramePreference)
         .background(
             Group {
                 if isSelected {
@@ -574,11 +573,9 @@ struct VisibleItem: Identifiable {
 
 struct FlatOutline: View {
     var store: OutlineStore
-    @State private var rowFrames: [UUID: CGRect] = [:]
 
     var body: some View {
         let items = store.visibleNodes().map { VisibleItem(node: $0.node, depth: $0.depth) }
-        let guideSegments = HierarchyGuideLayout.segments(items: items, rowFrames: rowFrames)
         let selectedIds = store.selectedNodeIds
         let draggedIds = store.draggedNodeIds
         let selectedCount = selectedIds.count
@@ -590,41 +587,29 @@ struct FlatOutline: View {
         let pendingCursorPosition = store.pendingCursorPosition
         let searchQuery = store.isSearchActive ? store.searchQuery : ""
 
-        ZStack(alignment: .topLeading) {
-            HierarchyGuideOverlay(segments: guideSegments)
-                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
-                .allowsHitTesting(false)
-
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 0) {
-                        let isSelected = selectedIds.contains(item.node.id)
-                        NodeRowView(
-                            node: item.node,
-                            depth: item.depth,
-                            store: store,
-                            isSelected: isSelected,
-                            isDragging: draggedIds.contains(item.node.id),
-                            isDropTarget: dropTargetId == item.node.id,
-                            dropAbove: dropAbove,
-                            dropAsChild: dropAsChild,
-                            hasSelection: hasSelection,
-                            shouldFocus: pendingFocusId == item.node.id,
-                            cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
-                            searchQuery: searchQuery,
-                            dragCount: isSelected ? max(selectedCount, 1) : 1
-                        )
-                        if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
-                            NoteEditorView(node: item.node, depth: item.depth, store: store)
-                        }
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(items) { item in
+                VStack(alignment: .leading, spacing: 0) {
+                    let isSelected = selectedIds.contains(item.node.id)
+                    NodeRowView(
+                        node: item.node,
+                        depth: item.depth,
+                        store: store,
+                        isSelected: isSelected,
+                        isDragging: draggedIds.contains(item.node.id),
+                        isDropTarget: dropTargetId == item.node.id,
+                        dropAbove: dropAbove,
+                        dropAsChild: dropAsChild,
+                        hasSelection: hasSelection,
+                        shouldFocus: pendingFocusId == item.node.id,
+                        cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
+                        searchQuery: searchQuery,
+                        dragCount: isSelected ? max(selectedCount, 1) : 1
+                    )
+                    if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
+                        NoteEditorView(node: item.node, depth: item.depth, store: store)
                     }
                 }
-            }
-        }
-        .coordinateSpace(name: OutlineLayoutMetrics.outlineCoordinateSpace)
-        .onPreferenceChange(RowFramePreferenceKey.self) { frames in
-            if !HierarchyGuideLayout.framesAreVisuallyEqual(rowFrames, frames) {
-                rowFrames = frames
             }
         }
     }
