@@ -93,7 +93,11 @@ enum WindowTabCoordinator {
         window.animationBehavior = animationBehavior
     }
 
+    private static var configuredWindows = NSHashTable<NSWindow>.weakObjects()
+
     private static func configureChrome(_ window: NSWindow) {
+        guard !configuredWindows.contains(window) else { return }
+        configuredWindows.add(window)
         window.isRestorable = false
         window.restorationClass = nil
         window.titleVisibility = .visible

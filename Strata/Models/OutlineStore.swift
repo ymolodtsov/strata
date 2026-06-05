@@ -64,6 +64,7 @@ class OutlineStore {
     var selectedNodeIds: Set<UUID> = []
 
     weak var document: StrataDocument?
+    private var dirtyWorkItem: DispatchWorkItem?
 
     // MARK: - Undo / Redo
 
@@ -1366,7 +1367,14 @@ class OutlineStore {
 
     func scheduleSave() {
         treeModifiedSinceLastSnapshot = true
-        document?.updateChangeCount(.changeDone)
+        // Debounce updateChangeCount so NSDocument's autosave doesn't trigger
+        // during rapid edits or scroll, blocking the main thread with a tree snapshot.
+        dirtyWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.document?.updateChangeCount(.changeDone)
+        }
+        dirtyWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
     }
 
     /// Load file content into this store, replacing the current tree.

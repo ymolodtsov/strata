@@ -397,19 +397,11 @@ struct WindowConfigurator: NSViewRepresentable {
             self.store = store
         }
 
-        func windowDidUpdate(_ notification: Notification) {
-            WindowTabCoordinator.configure(notification.object as? NSWindow)
-        }
-
         func windowDidBecomeKey(_ notification: Notification) {
             WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
 
         func windowDidBecomeMain(_ notification: Notification) {
-            WindowTabCoordinator.configure(notification.object as? NSWindow)
-        }
-
-        func windowDidResize(_ notification: Notification) {
             WindowTabCoordinator.configure(notification.object as? NSWindow)
         }
     }
