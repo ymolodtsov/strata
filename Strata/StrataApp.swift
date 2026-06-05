@@ -388,15 +388,12 @@ struct DocumentWindowView: View {
 // MARK: - App Delegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    // Created at init time — before SwiftUI accesses NSDocumentController.shared —
+    // so our subclass is registered as the shared controller.
+    private let documentController = StrataDocumentController()
     private var resignObserver: Any?
     private var closeObserver: Any?
     private var isTerminating = false
-
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // Register our custom document controller BEFORE applicationDidFinishLaunching,
-        // so it becomes NSDocumentController.shared before AppKit installs the default.
-        _ = StrataDocumentController()
-    }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         // Let DocumentWindowView handle first-launch logic (session restore, welcome doc).
@@ -468,6 +465,7 @@ struct StrataApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @FocusedValue(\.activeStore) var activeStore
     @FocusedValue(\.openWindowAction) var openWindowAction
+    @State private var recentFilesVersion = 0
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -562,6 +560,7 @@ struct StrataApp: App {
                 }
 
                 Menu("Open Recent") {
+                    let _ = recentFilesVersion // trigger SwiftUI re-evaluation
                     let urls = NSDocumentController.shared.recentDocumentURLs
                     ForEach(urls, id: \.self) { url in
                         Button(OutlineStore.displayName(for: url)) {
@@ -574,6 +573,7 @@ struct StrataApp: App {
                     }
                     Button("Clear Menu") {
                         NSDocumentController.shared.clearRecentDocuments(nil)
+                        recentFilesVersion += 1
                     }
                     .disabled(urls.isEmpty)
                 }
@@ -793,8 +793,11 @@ struct StrataApp: App {
         }
 
         guard let openWindow = openWindowAction else { return }
-        let controller = NSDocumentController.shared as! StrataDocumentController
-        controller.openUntitledDocumentAsTab { id in openWindow(id: id) }
+        let doc = StrataDocument()
+        NSDocumentController.shared.addDocument(doc)
+        StrataDocumentController.pendingDocuments.append(doc)
+        WindowTabCoordinator.requestNextWindowAsTab()
+        openWindow(id: "main")
     }
 
     private func duplicateActiveDocument() {
@@ -900,10 +903,24 @@ struct StrataApp: App {
             store.document?.fileURL = fileURL
             store.document?.fileType = "org.opml.opml"
             NSDocumentController.shared.noteNewRecentDocumentURL(fileURL)
+            recentFilesVersion += 1
         } else if let openWindow = openWindowAction {
-            // Current window has a file — open in a new tab via document controller
-            let controller = NSDocumentController.shared as! StrataDocumentController
-            controller.openDocumentAsTab(at: fileURL) { id in openWindow(id: id) }
+            // Current window has a file — open in a new tab
+            // Check if already open
+            if let existingDoc = NSDocumentController.shared.documents.first(where: { $0.fileURL?.standardizedFileURL == fileURL }) as? StrataDocument {
+                existingDoc.showWindows()
+            } else {
+                let doc = StrataDocument()
+                doc.store.loadFile(from: fileURL)
+                doc.fileURL = fileURL
+                doc.fileType = "org.opml.opml"
+                NSDocumentController.shared.addDocument(doc)
+                NSDocumentController.shared.noteNewRecentDocumentURL(fileURL)
+                StrataDocumentController.pendingDocuments.append(doc)
+                WindowTabCoordinator.requestNextWindowAsTab()
+                openWindow(id: "main")
+            }
+            recentFilesVersion += 1
         } else {
             // Fallback for menu/native recent paths where SwiftUI focused values are unavailable.
             SessionState.queueOpenURLs([fileURL])

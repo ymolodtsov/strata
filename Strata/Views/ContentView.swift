@@ -350,9 +350,9 @@ struct WindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(view.window)
             if let window = view.window {
+                bridgeDocumentToWindow(window)
                 configure(window, context: context)
                 SessionState.associate(store: store, with: window)
-                bridgeDocumentToWindow(window)
             }
             onWindowChange(view.window)
         }
@@ -363,9 +363,9 @@ struct WindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             WindowTabCoordinator.configure(nsView.window)
             if let window = nsView.window {
+                bridgeDocumentToWindow(window)
                 configure(window, context: context)
                 SessionState.associate(store: store, with: window)
-                bridgeDocumentToWindow(window)
             }
             onWindowChange(nsView.window)
         }

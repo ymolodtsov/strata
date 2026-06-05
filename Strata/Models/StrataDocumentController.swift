@@ -44,7 +44,7 @@ class StrataDocumentController: NSDocumentController {
         }
 
         do {
-            let doc = try makeDocument(withContentsOf: fileURL, ofType: "org.opml.opml") as! StrataDocument
+            let doc = try makeDocument(withContentsOf: fileURL, ofType: "org.opml.opml") as! StrataDocument // safe: makeDocument above always returns StrataDocument
             addDocument(doc)
             noteNewRecentDocumentURL(fileURL)
             Self.pendingDocuments.append(doc)
@@ -58,7 +58,7 @@ class StrataDocumentController: NSDocumentController {
     /// Creates an untitled document and opens it as a tab in the current window.
     func openUntitledDocumentAsTab(using openWindow: @escaping (String) -> Void) {
         do {
-            let doc = try makeUntitledDocument(ofType: "org.opml.opml") as! StrataDocument
+            let doc = try makeUntitledDocument(ofType: "org.opml.opml") as! StrataDocument // safe: makeUntitledDocument above always returns StrataDocument
             addDocument(doc)
             Self.pendingDocuments.append(doc)
             WindowTabCoordinator.requestNextWindowAsTab()
