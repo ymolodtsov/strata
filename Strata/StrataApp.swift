@@ -206,7 +206,7 @@ enum SessionState {
                 guard seenWindows.insert(id).inserted,
                       tabWindow.isVisible,
                       let store = windowStores[id]?.store,
-                      let url = store.currentFilePath else { continue }
+                      let url = store.document?.fileURL else { continue }
                 urls.append(url)
             }
         }
@@ -416,10 +416,10 @@ struct DocumentWindowView: View {
                     store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
                     wrapStoreInDocument()
                 } else if let url = SessionState.pendingRestoreURLs.first {
-                    // This window was created during session restoration — load its file
+                    // This window was created during session restoration -- load its file
                     SessionState.pendingRestoreURLs.removeFirst()
                     store.loadFile(from: url)
-                    wrapStoreInDocument()
+                    wrapStoreInDocument(url: url)
                 } else if let url = SessionState.pendingWorkflowyImportURLs.first {
                     SessionState.pendingWorkflowyImportURLs.removeFirst()
                     store.loadWorkflowyOPMLImport(from: url)
@@ -439,18 +439,19 @@ struct DocumentWindowView: View {
         store = doc.store
     }
 
-    /// Wrap the current store (created by @State or populated via loadFile/etc.)
-    /// in a StrataDocument so NSDocument tracks it. This is the bridge for legacy
-    /// code paths that still create stores directly.
-    private func wrapStoreInDocument() {
+    /// Wrap the current store in a StrataDocument so NSDocument tracks it.
+    /// If a URL is provided, it becomes the document's file URL.
+    private func wrapStoreInDocument(url: URL? = nil) {
         if store.document == nil {
             let doc = StrataDocument(store: store)
-            if let url = store.currentFilePath {
+            if let url {
                 doc.fileURL = url
                 doc.fileType = "org.opml.opml"
             }
-            // Register with NSDocumentController so it tracks open documents.
             NSDocumentController.shared.addDocument(doc)
+        } else if let url {
+            store.document?.fileURL = url
+            store.document?.fileType = "org.opml.opml"
         }
     }
 
@@ -468,7 +469,7 @@ struct DocumentWindowView: View {
         if !savedURLs.isEmpty {
             // Load the first document into this window
             store.loadFile(from: savedURLs[0])
-            wrapStoreInDocument()
+            wrapStoreInDocument(url: savedURLs[0])
 
             // Queue remaining URLs and open new windows/tabs for each
             let remaining = Array(savedURLs.dropFirst())
@@ -496,7 +497,7 @@ struct DocumentWindowView: View {
 
         if let url = showLaunchOpenPanel() {
             store.loadFile(from: url)
-            wrapStoreInDocument()
+            wrapStoreInDocument(url: url)
             window?.makeKeyAndOrderFront(nil)
         } else if let window {
             SessionState.forgetAndSave(window: window)
@@ -507,16 +508,16 @@ struct DocumentWindowView: View {
     private func openQueuedURLs() {
         let urls = SessionState.consumePendingOpenURLs()
         guard !urls.isEmpty else { return }
-        openURLs(urls, preferCurrentWindow: store.currentFilePath == nil)
+        openURLs(urls, preferCurrentWindow: store.document?.fileURL == nil)
     }
 
     private func openURLs(_ urls: [URL], preferCurrentWindow: Bool) {
         guard let first = urls.first else { return }
         let remaining: ArraySlice<URL>
 
-        if preferCurrentWindow && store.currentFilePath == nil {
+        if preferCurrentWindow && store.document?.fileURL == nil {
             store.loadFile(from: first)
-            wrapStoreInDocument()
+            wrapStoreInDocument(url: first)
             remaining = urls.dropFirst()
         } else {
             remaining = urls[...]
@@ -725,12 +726,12 @@ struct StrataApp: App {
 
             CommandGroup(replacing: .saveItem) {
                 Button("Save") {
-                    activeStore?.saveExplicitly()
+                    activeStore?.document?.save(nil)
                 }
                 .keyboardShortcut("s")
 
                 Button("Save As...") {
-                    activeStore?.saveFileAs()
+                    activeStore?.document?.saveAs(nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
 
@@ -930,7 +931,7 @@ struct StrataApp: App {
     }
 
     private func openUntitledTab() {
-        if let store = activeStore, store.currentFilePath == nil, store.root.children.count == 1, store.root.children[0].text.isEmpty {
+        if let store = activeStore, store.document?.fileURL == nil, store.root.children.count == 1, store.root.children[0].text.isEmpty {
             return
         }
 
@@ -1020,7 +1021,6 @@ struct StrataApp: App {
 
     private func closeCurrentTab() {
         guard let window = NSApp.keyWindow else { return }
-        activeStore?.save()
         window.performClose(nil)
 
         DispatchQueue.main.async {
@@ -1040,9 +1040,11 @@ struct StrataApp: App {
 
         recentFiles.add(fileURL)
         let targetStore = activeStore ?? SessionState.bestActiveStore()
-        if let store = targetStore, store.currentFilePath == nil {
-            // Current window is untitled — load into it
+        if let store = targetStore, store.document?.fileURL == nil {
+            // Current window is untitled -- load into it
             store.loadFile(from: fileURL)
+            store.document?.fileURL = fileURL
+            store.document?.fileType = "org.opml.opml"
         } else if let openWindow = openWindowAction {
             // Current window has a file — open in a new tab
             WindowTabCoordinator.requestNextWindowAsTab()
@@ -1062,7 +1064,7 @@ struct StrataApp: App {
         }
 
         let targetStore = activeStore ?? SessionState.bestActiveStore()
-        if let store = targetStore, store.currentFilePath == nil {
+        if let store = targetStore, store.document?.fileURL == nil {
             store.loadWorkflowyOPMLImport(from: fileURL)
         } else if let openWindow = openWindowAction {
             WindowTabCoordinator.requestNextWindowAsTab()

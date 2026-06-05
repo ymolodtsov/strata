@@ -65,15 +65,9 @@ class OutlineStore {
     var zoomPath: [UUID] = []
     var pendingFocusId: UUID?
     var pendingCursorPosition: Int?
-    var currentFilePath: URL?
-    var untitledDisplayName: String?
     var selectedNodeIds: Set<UUID> = []
 
     weak var document: StrataDocument?
-
-    private var saveWorkItem: DispatchWorkItem?
-    private var terminateObserver: Any?
-    private var resignObserver: Any?
 
     // MARK: - Undo / Redo
 
@@ -160,35 +154,15 @@ class OutlineStore {
         } else {
             pendingFocusId = currentRoot.children.first?.id
         }
-        save()
+        scheduleSave()
     }
 
     var documentTitle: String {
-        guard let url = currentFilePath else { return untitledDisplayName ?? "Untitled" }
-        if url == Self.defaultFileURL { return "Strata" }
-        return Self.displayName(for: url)
+        document?.displayName ?? "Untitled"
     }
 
     static func displayName(for url: URL) -> String {
         FileManager.default.displayName(atPath: url.path)
-    }
-
-    var shouldPromptToSaveBeforeClosing: Bool {
-        currentFilePath == nil && hasMeaningfulContent
-    }
-
-    private var hasMeaningfulContent: Bool {
-        root.children.contains { Self.nodeHasMeaningfulContent($0) }
-    }
-
-    private static func nodeHasMeaningfulContent(_ node: OutlineNode) -> Bool {
-        if !node.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !node.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !node.formatting.isEmpty ||
-            node.isDone {
-            return true
-        }
-        return node.children.contains { nodeHasMeaningfulContent($0) }
     }
 
     init() {
@@ -197,33 +171,11 @@ class OutlineStore {
         ])
         root.children.first?.parent = root
         Self.openStores.add(self)
-        setupSaveOnQuit()
     }
 
     init(root: OutlineNode) {
         self.root = root
         Self.openStores.add(self)
-        setupSaveOnQuit()
-    }
-
-    private func setupSaveOnQuit() {
-        terminateObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.saveWorkItem?.cancel()
-            self?.save()
-        }
-        resignObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.saveWorkItem?.cancel()
-            self?.save()
-        }
-    }
-
-    deinit {
-        if let obs = terminateObserver { NotificationCenter.default.removeObserver(obs) }
-        if let obs = resignObserver { NotificationCenter.default.removeObserver(obs) }
     }
 
     var hasSelection: Bool { !selectedNodeIds.isEmpty }
@@ -1418,108 +1370,19 @@ class OutlineStore {
 
     // MARK: - Persistence
 
-    private static var defaultDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("Strata")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    static var defaultFileURL: URL {
-        defaultDirectory.appendingPathComponent("default.opml")
-    }
-
-    func renameDocument(to newName: String) {
-        guard let url = currentFilePath else { return }
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let ext = url.pathExtension
-        let newFileName = trimmed.hasSuffix(".\(ext)") ? trimmed : "\(trimmed).\(ext)"
-        let newURL = url.deletingLastPathComponent().appendingPathComponent(newFileName)
-        guard newURL != url else { return }
-
-        do {
-            try FileManager.default.moveItem(at: url, to: newURL)
-            currentFilePath = newURL
-            RecentFiles.shared.add(newURL)
-        } catch {}
-    }
-
     func scheduleSave() {
         treeModifiedSinceLastSnapshot = true
-        // Notify NSDocument that the document has unsaved changes so it can
-        // participate in dirty-tracking and auto-save.
         document?.updateChangeCount(.changeDone)
-        saveWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            self?.save()
-        }
-        saveWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
     }
 
-    func save() {
-        guard let url = currentFilePath else { return }
-        let data = OPMLService.serialize(root: root)
-        try? data.write(to: url)
-    }
-
-    func save(to url: URL) {
-        currentFilePath = url
-        untitledDisplayName = nil
-        let data = OPMLService.serialize(root: root)
-        try? data.write(to: url)
-        RecentFiles.shared.add(url)
-    }
-
-    /// User-triggered save — prompts for file path if this is an unsaved document
-    func saveExplicitly() {
-        if currentFilePath == nil {
-            saveFileAs()
-        } else {
-            save()
-        }
-    }
-
-    static func load() -> OutlineStore {
-        load(from: defaultFileURL)
-    }
-
-    static func load(from url: URL) -> OutlineStore {
-        guard let loaded = loadDocument(from: url) else {
-            return OutlineStore()
-        }
-        let store = OutlineStore(root: loaded.root)
-        store.ensureEditableRoot()
-        store.currentFilePath = loaded.savesBackToOriginalURL ? url : nil
-        store.untitledDisplayName = loaded.savesBackToOriginalURL ? nil : loaded.displayName
-        return store
-    }
-
-    /// Open a file into this window, replacing the current content
-    func openFile() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = Self.readableContentTypes
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        if panel.runModal() == .OK, let url = panel.url {
-            loadFile(from: url)
-        }
-    }
-
-    /// Replace the current document content with a file
+    /// Load file content into this store, replacing the current tree.
+    /// Does not manage file paths or document association -- the caller
+    /// (DocumentWindowView) is responsible for wrapping in a StrataDocument.
     func loadFile(from url: URL) {
         guard let loaded = Self.loadDocument(from: url) else { return }
 
-        // Save current document before switching
-        save()
-
         root = loaded.root
         ensureEditableRoot()
-        currentFilePath = loaded.savesBackToOriginalURL ? url : nil
-        untitledDisplayName = loaded.savesBackToOriginalURL ? nil : loaded.displayName
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
@@ -1570,12 +1433,8 @@ class OutlineStore {
             savesOPMLBackToOriginal: false
         ) else { return }
 
-        save()
-
         root = loaded.root
         ensureEditableRoot()
-        currentFilePath = nil
-        untitledDisplayName = loaded.displayName
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
@@ -1690,40 +1549,19 @@ class OutlineStore {
         }
     }
 
-    @discardableResult
-    func saveFileAs() -> Bool {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "opml")!]
-        if let currentURL = currentFilePath {
-            panel.nameFieldStringValue = currentURL.lastPathComponent
-        } else if let untitledDisplayName {
-            panel.nameFieldStringValue = untitledDisplayName
-        } else {
-            panel.nameFieldStringValue = "outline.opml"
-        }
-
-        if panel.runModal() == .OK, let url = panel.url {
-            save(to: url)
-            return true
-        }
-        return false
-    }
-
     func duplicateTemplate() -> (root: OutlineNode, displayName: String) {
-        if let currentURL = currentFilePath {
-            let baseName = currentURL.deletingPathExtension().lastPathComponent
-            return (root.deepCopy(), "\(baseName) copy.opml")
+        let baseName: String
+        if let url = document?.fileURL {
+            baseName = url.deletingPathExtension().lastPathComponent
+        } else {
+            let docName = document?.displayName ?? "outline"
+            baseName = (docName as NSString).deletingPathExtension
         }
-
-        let baseName = untitledDisplayName.map { ($0 as NSString).deletingPathExtension } ?? "outline"
         return (root.deepCopy(), "\(baseName) copy.opml")
     }
 
     func loadUntitledCopy(root newRoot: OutlineNode, displayName: String) {
-        save()
         root = newRoot
-        currentFilePath = nil
-        untitledDisplayName = displayName
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
@@ -1741,11 +1579,8 @@ class OutlineStore {
               let data = try? Data(contentsOf: url),
               let newRoot = try? OPMLService.parse(data: data) else { return false }
 
-        save()
         root = newRoot
         ensureEditableRoot()
-        currentFilePath = nil
-        untitledDisplayName = "Welcome to Strata.opml"
         zoomPath = []
         undoStack.removeAll()
         redoStack.removeAll()
