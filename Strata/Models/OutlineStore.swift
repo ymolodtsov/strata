@@ -64,7 +64,6 @@ class OutlineStore {
     var selectedNodeIds: Set<UUID> = []
 
     weak var document: StrataDocument?
-    private var dirtyWorkItem: DispatchWorkItem?
 
     // MARK: - Undo / Redo
 
@@ -156,6 +155,18 @@ class OutlineStore {
 
     var documentTitle: String {
         document?.displayName ?? "Untitled"
+    }
+
+    func resetViewState() {
+        zoomPath = []
+        undoStack.removeAll()
+        redoStack.removeAll()
+        selectedNodeIds.removeAll()
+        draggedNodeIds.removeAll()
+        dropTargetId = nil
+        dropAsChild = false
+        treeModifiedSinceLastSnapshot = true
+        pendingFocusId = root.children.first?.id
     }
 
     static func displayName(for url: URL) -> String {
@@ -1367,14 +1378,7 @@ class OutlineStore {
 
     func scheduleSave() {
         treeModifiedSinceLastSnapshot = true
-        // Debounce updateChangeCount so NSDocument's autosave doesn't trigger
-        // during rapid edits or scroll, blocking the main thread with a tree snapshot.
-        dirtyWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            self?.document?.updateChangeCount(.changeDone)
-        }
-        dirtyWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+        document?.updateChangeCount(.changeDone)
     }
 
     /// Load file content into this store, replacing the current tree.

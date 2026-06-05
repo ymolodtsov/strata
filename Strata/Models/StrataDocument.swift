@@ -56,6 +56,7 @@ class StrataDocument: NSDocument {
         }
 
         store.ensureEditableRoot()
+        store.resetViewState()
     }
 
     // MARK: - Writing

@@ -876,8 +876,9 @@ struct StrataApp: App {
                 if StrataTextField.currentEditingField?.onPasteNodes?() == true {
                     StrataTextField.currentEditingField?.markStructuralEditForUndo()
                 }
-            } else {
-                textView.paste(nil)
+            } else if let text = pasteboard.string(forType: .string) {
+                // Insert as plain text to strip foreign rich-text formatting
+                textView.insertText(text, replacementRange: textView.selectedRange)
             }
         } else {
             activeStore?.pasteAfterSelection()

@@ -379,6 +379,10 @@ struct WindowConfigurator: NSViewRepresentable {
         guard let doc = store.document else { return }
         let alreadyBridged = doc.windowControllers.contains { $0.window === window }
         guard !alreadyBridged else { return }
+        // Remove stale window controllers (nil window = tab was dragged away)
+        for wc in doc.windowControllers where wc.window == nil || (wc.window !== window && wc is StrataWindowController) {
+            doc.removeWindowController(wc)
+        }
         let wc = StrataWindowController(window: window)
         doc.addWindowController(wc)
     }
@@ -395,6 +399,46 @@ struct WindowConfigurator: NSViewRepresentable {
 
         init(store: OutlineStore) {
             self.store = store
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            // Let NSDocument handle save-on-close. If the document has unsaved
+            // changes, canClose will show the save dialog.
+            guard let doc = store.document else { return true }
+            var shouldClose = false
+            var responded = false
+            doc.canClose(withDelegate: self,
+                         shouldClose: #selector(document(_:shouldClose:)),
+                         contextInfo: nil)
+            // canClose calls its callback synchronously when autosavesInPlace
+            // is true and the document is clean, or shows a sheet and calls
+            // asynchronously. For the sync case, we can capture the result
+            // via the selector. For async (sheet), return false and close later.
+            return doc.isDocumentEdited ? false : true
+        }
+
+        @objc private func document(_ doc: NSDocument, shouldClose: Bool) {
+            if shouldClose {
+                doc.close()
+                // Also close the window
+                doc.windowControllers.forEach { wc in
+                    wc.window?.close()
+                }
+            }
+        }
+
+        func windowWillClose(_ notification: Notification) {
+            // Clean up document when window closes
+            guard let window = notification.object as? NSWindow,
+                  let doc = store.document else { return }
+            // Remove stale window controllers for this window
+            for wc in doc.windowControllers where wc.window === window {
+                doc.removeWindowController(wc)
+            }
+            // If this was the last window controller, close the document
+            if doc.windowControllers.isEmpty {
+                NSDocumentController.shared.removeDocument(doc)
+            }
         }
 
         func windowDidBecomeKey(_ notification: Notification) {
