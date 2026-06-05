@@ -81,3 +81,15 @@ class StrataDocument: NSDocument {
         OPMLService.serialize(root: pendingSnapshot ?? store.root)
     }
 }
+
+// MARK: - Thin Window Controller Bridge
+
+/// Minimal NSWindowController that does NOT create its own window.
+/// It gets assigned the window that WindowGroup already created, giving
+/// NSDocument the window reference it needs for title-bar proxy icon and
+/// native rename/move/tags popover.
+class StrataWindowController: NSWindowController {
+
+    /// Prevent NSWindowController from loading a nib or creating a window on its own.
+    override var windowNibName: NSNib.Name? { nil }
+}

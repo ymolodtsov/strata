@@ -1448,6 +1448,9 @@ class OutlineStore {
 
     func scheduleSave() {
         treeModifiedSinceLastSnapshot = true
+        // Notify NSDocument that the document has unsaved changes so it can
+        // participate in dirty-tracking and auto-save.
+        document?.updateChangeCount(.changeDone)
         saveWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             self?.save()

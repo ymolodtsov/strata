@@ -404,24 +404,54 @@ struct DocumentWindowView: View {
             .focusedSceneValue(\.activeStore, store)
             .focusedSceneValue(\.openWindowAction, openWindow)
             .onAppear {
-                if Self.isFirstWindow {
+                // If a StrataDocument was queued for this window, adopt its store.
+                if let pendingDoc = StrataDocumentController.pendingDocuments.first {
+                    StrataDocumentController.pendingDocuments.removeFirst()
+                    adoptDocument(pendingDoc)
+                } else if Self.isFirstWindow {
                     Self.isFirstWindow = false
                     restoreSession()
                 } else if let copy = SessionState.pendingUntitledCopies.first {
                     SessionState.pendingUntitledCopies.removeFirst()
                     store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
+                    wrapStoreInDocument()
                 } else if let url = SessionState.pendingRestoreURLs.first {
                     // This window was created during session restoration — load its file
                     SessionState.pendingRestoreURLs.removeFirst()
                     store.loadFile(from: url)
+                    wrapStoreInDocument()
                 } else if let url = SessionState.pendingWorkflowyImportURLs.first {
                     SessionState.pendingWorkflowyImportURLs.removeFirst()
                     store.loadWorkflowyOPMLImport(from: url)
+                    wrapStoreInDocument()
+                } else {
+                    // Untitled new tab — wrap in a StrataDocument
+                    wrapStoreInDocument()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: SessionState.openURLsNotification)) { _ in
                 openQueuedURLs()
             }
+    }
+
+    /// Replace this view's store with the one owned by an existing StrataDocument.
+    private func adoptDocument(_ doc: StrataDocument) {
+        store = doc.store
+    }
+
+    /// Wrap the current store (created by @State or populated via loadFile/etc.)
+    /// in a StrataDocument so NSDocument tracks it. This is the bridge for legacy
+    /// code paths that still create stores directly.
+    private func wrapStoreInDocument() {
+        if store.document == nil {
+            let doc = StrataDocument(store: store)
+            if let url = store.currentFilePath {
+                doc.fileURL = url
+                doc.fileType = "org.opml.opml"
+            }
+            // Register with NSDocumentController so it tracks open documents.
+            NSDocumentController.shared.addDocument(doc)
+        }
     }
 
     /// Restore previously open documents: load saved session state, open additional
@@ -438,6 +468,7 @@ struct DocumentWindowView: View {
         if !savedURLs.isEmpty {
             // Load the first document into this window
             store.loadFile(from: savedURLs[0])
+            wrapStoreInDocument()
 
             // Queue remaining URLs and open new windows/tabs for each
             let remaining = Array(savedURLs.dropFirst())
@@ -453,6 +484,7 @@ struct DocumentWindowView: View {
 
         if SessionState.shouldShowWelcomeDocument, store.loadBundledWelcomeDocument() {
             SessionState.markWelcomeDocumentShown()
+            wrapStoreInDocument()
             let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
             window?.makeKeyAndOrderFront(nil)
             return
@@ -464,6 +496,7 @@ struct DocumentWindowView: View {
 
         if let url = showLaunchOpenPanel() {
             store.loadFile(from: url)
+            wrapStoreInDocument()
             window?.makeKeyAndOrderFront(nil)
         } else if let window {
             SessionState.forgetAndSave(window: window)
@@ -483,6 +516,7 @@ struct DocumentWindowView: View {
 
         if preferCurrentWindow && store.currentFilePath == nil {
             store.loadFile(from: first)
+            wrapStoreInDocument()
             remaining = urls.dropFirst()
         } else {
             remaining = urls[...]
@@ -503,6 +537,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resignObserver: Any?
     private var closeObserver: Any?
     private var isTerminating = false
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Register our custom document controller BEFORE applicationDidFinishLaunching,
+        // so it becomes NSDocumentController.shared before AppKit installs the default.
+        _ = StrataDocumentController()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Keep tab creation under Strata's Cmd-T/menu flow until the app moves to

@@ -354,6 +354,7 @@ struct WindowConfigurator: NSViewRepresentable {
             if let window = view.window {
                 configure(window, context: context)
                 SessionState.associate(store: store, with: window)
+                bridgeDocumentToWindow(window)
             }
             onWindowChange(view.window)
         }
@@ -376,9 +377,22 @@ struct WindowConfigurator: NSViewRepresentable {
                 }
                 window.isDocumentEdited = store.shouldPromptToSaveBeforeClosing
                 SessionState.associate(store: store, with: window)
+                bridgeDocumentToWindow(window)
             }
             onWindowChange(nsView.window)
         }
+    }
+
+    /// If the store has an associated StrataDocument and no window controller for
+    /// this window yet, create a thin StrataWindowController bridge so NSDocument
+    /// gets the window reference it needs for the title-bar proxy icon.
+    private func bridgeDocumentToWindow(_ window: NSWindow) {
+        guard let doc = store.document else { return }
+        // Only add a controller if this window isn't already tracked.
+        let alreadyBridged = doc.windowControllers.contains { $0.window === window }
+        guard !alreadyBridged else { return }
+        let wc = StrataWindowController(window: window)
+        doc.addWindowController(wc)
     }
 
     private func configure(_ window: NSWindow, context: Context) {
