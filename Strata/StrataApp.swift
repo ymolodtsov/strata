@@ -294,6 +294,7 @@ struct DocumentWindowView: View {
                     SessionState.pendingUntitledCopies.removeFirst()
                     store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
                     wrapStoreInDocument()
+                    store.document?.displayName = (copy.displayName as NSString).deletingPathExtension
                 } else if let url = SessionState.pendingRestoreURLs.first {
                     // This window was created during session restoration -- load its file
                     SessionState.pendingRestoreURLs.removeFirst()
@@ -365,6 +366,7 @@ struct DocumentWindowView: View {
         if SessionState.shouldShowWelcomeDocument, store.loadBundledWelcomeDocument() {
             SessionState.markWelcomeDocumentShown()
             wrapStoreInDocument()
+            store.document?.updateChangeCount(.changeCleared)
             let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible })
             window?.makeKeyAndOrderFront(nil)
             return
@@ -412,9 +414,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTerminating = false
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        // Let DocumentWindowView handle first-launch logic (session restore, welcome doc).
-        // Returning false prevents NSDocumentController from creating its own untitled doc.
         false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag, let cached = SessionState.cachedOpenWindow {
+            let doc = StrataDocument()
+            NSDocumentController.shared.addDocument(doc)
+            StrataDocumentController.enqueuePendingDocument(doc)
+            cached(id: "main")
+        }
+        return true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -622,6 +632,13 @@ struct StrataApp: App {
                     duplicateActiveDocument()
                 }
 
+                Button("Revert to Saved") {
+                    if let doc = activeStore?.document, let url = doc.fileURL {
+                        try? doc.revert(toContentsOf: url, ofType: doc.fileType ?? "org.opml.opml")
+                    }
+                }
+                .disabled(activeStore?.document?.fileURL == nil)
+
                 Divider()
 
                 Button("Check for Updates...") {
@@ -706,20 +723,30 @@ struct StrataApp: App {
 
                 Divider()
 
-                Button("Select Tab 1") {
-                    selectTab(at: 0)
+                Button("Show Next Tab") {
+                    cycleTab(forward: true)
                 }
-                .keyboardShortcut("1", modifiers: .command)
+                .keyboardShortcut(KeyEquivalent("\t"), modifiers: .control)
 
-                Button("Select Tab 2") {
-                    selectTab(at: 1)
+                Button("Show Previous Tab") {
+                    cycleTab(forward: false)
                 }
-                .keyboardShortcut("2", modifiers: .command)
+                .keyboardShortcut(KeyEquivalent("\t"), modifiers: [.control, .shift])
 
-                Button("Select Tab 3") {
-                    selectTab(at: 2)
+                Divider()
+
+                ForEach(1...9, id: \.self) { num in
+                    Button("Select Tab \(num)") {
+                        if num == 9 {
+                            if let windows = NSApp.keyWindow?.tabGroup?.windows, !windows.isEmpty {
+                                windows.last?.makeKeyAndOrderFront(nil)
+                            }
+                        } else {
+                            selectTab(at: num - 1)
+                        }
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(num))), modifiers: .command)
                 }
-                .keyboardShortcut("3", modifiers: .command)
             }
 
             // MARK: Outline
@@ -796,11 +823,13 @@ struct StrataApp: App {
     private func openFileAsTab() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = OutlineStore.readableContentTypes
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        openURLAsTab(url)
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        for url in panel.urls {
+            openURLAsTab(url)
+        }
     }
 
     private func importWorkflowyOPMLAsTab() {
@@ -817,7 +846,10 @@ struct StrataApp: App {
         let doc = StrataDocument()
         NSDocumentController.shared.addDocument(doc)
         StrataDocumentController.enqueuePendingDocument(doc)
-        // Use the focused openWindow if available, fall back to the cached one
+        // Open as tab if a window exists, standalone window otherwise
+        if NSApp.keyWindow != nil || NSApp.windows.contains(where: { $0.isVisible }) {
+            WindowTabCoordinator.requestNextWindowAsTab()
+        }
         if let openWindow = openWindowAction {
             openWindow(id: "main")
         } else if let cached = SessionState.cachedOpenWindow {
@@ -927,18 +959,18 @@ struct StrataApp: App {
     private func closeCurrentTab() {
         guard let window = NSApp.keyWindow else { return }
         window.performClose(nil)
-
-        DispatchQueue.main.async {
-            SessionState.saveOpenDocuments()
-            WindowTabCoordinator.configureVisibleWindows()
-        }
     }
 
     /// Load a URL — reuse the current window if untitled, otherwise open a new tab.
     private func openURLAsTab(_ url: URL) {
         let fileURL = url.standardizedFileURL
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            NSSound.beep()
+            let alert = NSAlert()
+            alert.messageText = "The document \"\(fileURL.lastPathComponent)\" could not be opened."
+            alert.informativeText = "The file cannot be found."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
             return
         }
 
@@ -996,6 +1028,16 @@ struct StrataApp: App {
         guard let windows = NSApp.keyWindow?.tabGroup?.windows,
               windows.indices.contains(index) else { return }
         windows[index].makeKeyAndOrderFront(nil)
+    }
+
+    private func cycleTab(forward: Bool) {
+        guard let windows = NSApp.keyWindow?.tabGroup?.windows,
+              let current = NSApp.keyWindow,
+              let index = windows.firstIndex(of: current) else { return }
+        let next = forward
+            ? windows[(index + 1) % windows.count]
+            : windows[(index - 1 + windows.count) % windows.count]
+        next.makeKeyAndOrderFront(nil)
     }
 
     private func collapseAll(_ node: OutlineNode) {

@@ -121,6 +121,7 @@ class OutlineStore {
         let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath, focusedId: pendingFocusId)
         redoStack.append(current)
         restoreSnapshot(snap)
+        document?.updateChangeCount(.changeUndone)
     }
 
     func redo() {
@@ -132,6 +133,7 @@ class OutlineStore {
         let current = UndoSnapshot(root: root.snapshot(), zoomPath: zoomPath, focusedId: pendingFocusId)
         undoStack.append(current)
         restoreSnapshot(snap)
+        document?.updateChangeCount(.changeRedone)
     }
 
     private func restoreSnapshot(_ snap: UndoSnapshot) {
@@ -141,16 +143,12 @@ class OutlineStore {
         draggedNodeIds.removeAll()
         dropTargetId = nil
         dropAsChild = false
-        treeModifiedSinceLastSnapshot = false
-        // Restore focus to the node that was focused when this snapshot was
-        // taken.  Fall back to the first visible child if that node no longer
-        // exists (e.g. it was deleted).
+        treeModifiedSinceLastSnapshot = true
         if let savedId = snap.focusedId, root.find(id: savedId) != nil {
             pendingFocusId = savedId
         } else {
             pendingFocusId = currentRoot.children.first?.id
         }
-        scheduleSave()
     }
 
     var documentTitle: String {
@@ -1603,7 +1601,7 @@ class OutlineStore {
 
     func exportAs(format: String) {
         let panel = NSSavePanel()
-        let baseName = documentTitle == "Strata" ? "outline" : documentTitle
+        let baseName = documentTitle
         let content: String
         switch format {
         case "txt":

@@ -385,6 +385,7 @@ struct WindowConfigurator: NSViewRepresentable {
         }
         let wc = StrataWindowController(window: window)
         doc.addWindowController(wc)
+        window.title = doc.displayName
     }
 
     private func configure(_ window: NSWindow, context: Context) {
@@ -411,7 +412,7 @@ struct WindowConfigurator: NSViewRepresentable {
             }
             // If this was the last window controller, close the document
             if doc.windowControllers.isEmpty {
-                NSDocumentController.shared.removeDocument(doc)
+                doc.close()
             }
         }
 
