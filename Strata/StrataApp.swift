@@ -122,8 +122,15 @@ enum WindowTabCoordinator {
 
 enum SessionState {
     private static let key = "openDocumentPaths"
+    private static let draftsKey = "untitledDraftPaths"
+    private static let windowGroupsKey = "windowTabGroups"
     private static let didShowWelcomeDocumentKey = "didShowWelcomeDocument.1.2.0"
     static let openURLsNotification = Notification.Name("StrataOpenURLsNotification")
+
+    private static var draftsDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("Strata/UntitledDrafts", isDirectory: true)
+    }
 
     struct PendingUntitledCopy {
         let root: OutlineNode
@@ -145,8 +152,16 @@ enum SessionState {
 
     private static var windowStores: [ObjectIdentifier: WindowStoreRef] = [:]
 
-    /// URLs waiting to be loaded by newly created windows during restoration.
+    /// Items waiting to be loaded by newly created windows during restoration.
+    struct PendingRestoreItem {
+        let url: URL
+        let isDraft: Bool
+        let isNewWindow: Bool  // true = open as new window, false = add as tab
+    }
+
     static var pendingRestoreURLs: [URL] = []
+    static var pendingRestoreDrafts: [URL] = []
+    static var pendingRestoreItems: [PendingRestoreItem] = []
     static var pendingWorkflowyImportURLs: [URL] = []
     static var pendingUntitledCopies: [PendingUntitledCopy] = []
     private static var pendingOpenURLs: [URL] = []
@@ -184,12 +199,123 @@ enum SessionState {
     }
 
     /// Collect file paths from all living OutlineStore instances and save to UserDefaults.
+    /// Also saves untitled document content to draft files and preserves window/tab grouping.
     static func saveOpenDocuments() {
-        let urls = orderedOpenDocumentURLs()
-        // Deduplicate while preserving order
-        var seen = Set<String>()
-        let unique = urls.filter { seen.insert($0.path).inserted }
-        UserDefaults.standard.set(unique.map(\.path), forKey: key)
+        cleanupWindowStores()
+        let fm = FileManager.default
+
+        // Ensure drafts directory exists
+        try? fm.createDirectory(at: draftsDirectory, withIntermediateDirectories: true)
+
+        // Remove old draft files before saving new ones
+        let oldDraftPaths = UserDefaults.standard.stringArray(forKey: draftsKey) ?? []
+        for path in oldDraftPaths {
+            try? fm.removeItem(atPath: path)
+        }
+
+        // Build window groups: [[entry]] where each entry is either a file path or a draft UUID
+        var windowGroups: [[[String: String]]] = []
+        var savedDraftPaths: [String] = []
+        var seenWindows = Set<ObjectIdentifier>()
+
+        // Collect flat list for backward-compatible key
+        var flatSavedPaths: [String] = []
+        var seenPaths = Set<String>()
+
+        for window in NSApp.windows {
+            let tabWindows = window.tabGroup?.windows ?? [window]
+            var group: [[String: String]] = []
+
+            for tabWindow in tabWindows {
+                let id = ObjectIdentifier(tabWindow)
+                guard seenWindows.insert(id).inserted,
+                      tabWindow.isVisible,
+                      let store = windowStores[id]?.store else { continue }
+
+                if let url = store.document?.fileURL {
+                    // Saved document
+                    let path = url.path
+                    group.append(["path": path, "isDraft": "false"])
+                    if seenPaths.insert(path).inserted {
+                        flatSavedPaths.append(path)
+                    }
+                } else if store.root.children.count > 1 ||
+                          (store.root.children.count == 1 && !store.root.children[0].text.isEmpty) {
+                    // Untitled document with content -- save as draft
+                    let draftId = UUID().uuidString
+                    let draftURL = draftsDirectory.appendingPathComponent("\(draftId).opml")
+                    let data = OPMLService.serialize(root: store.root)
+                    do {
+                        try data.write(to: draftURL, options: .atomic)
+                        savedDraftPaths.append(draftURL.path)
+                        group.append(["draft": draftId, "isDraft": "true"])
+                    } catch {
+                        // Draft save failed -- skip this entry
+                    }
+                }
+            }
+
+            if !group.isEmpty {
+                windowGroups.append(group)
+            }
+        }
+
+        // Save backward-compatible flat list (saved files only)
+        UserDefaults.standard.set(flatSavedPaths, forKey: key)
+        // Save draft paths for cleanup
+        UserDefaults.standard.set(savedDraftPaths, forKey: draftsKey)
+        // Save window groups as JSON
+        if let data = try? JSONSerialization.data(withJSONObject: windowGroups),
+           let json = String(data: data, encoding: .utf8) {
+            UserDefaults.standard.set(json, forKey: windowGroupsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: windowGroupsKey)
+        }
+    }
+
+    /// Load saved session state including window groups and drafts.
+    /// Returns an array of window groups, where each group is an array of (url, isDraft) pairs.
+    static func loadSavedWindowGroups() -> [[(url: URL, isDraft: Bool)]] {
+        let fm = FileManager.default
+
+        // Try the new window groups format first
+        if let json = UserDefaults.standard.string(forKey: windowGroupsKey),
+           let data = json.data(using: .utf8),
+           let rawGroups = try? JSONSerialization.jsonObject(with: data) as? [[[String: String]]] {
+
+            var result: [[(url: URL, isDraft: Bool)]] = []
+
+            for group in rawGroups {
+                var entries: [(url: URL, isDraft: Bool)] = []
+                for entry in group {
+                    if entry["isDraft"] == "true", let draftId = entry["draft"] {
+                        let draftURL = draftsDirectory.appendingPathComponent("\(draftId).opml")
+                        if fm.fileExists(atPath: draftURL.path) {
+                            entries.append((draftURL, true))
+                        }
+                    } else if let path = entry["path"] {
+                        let url = URL(fileURLWithPath: path)
+                        if fm.fileExists(atPath: path) {
+                            entries.append((url, false))
+                        }
+                    }
+                }
+                if !entries.isEmpty {
+                    result.append(entries)
+                }
+            }
+
+            if !result.isEmpty {
+                return result
+            }
+        }
+
+        // Fallback: load from flat list (backward compatibility)
+        let savedURLs = loadSavedDocuments()
+        if !savedURLs.isEmpty {
+            return [savedURLs.map { ($0, false) }]
+        }
+        return []
     }
 
     /// Read saved document paths from UserDefaults, filtering out files that no longer exist.
@@ -201,33 +327,31 @@ enum SessionState {
         }
     }
 
+    /// Remove a draft file when the user saves or closes the document.
+    static func cleanupDraft(at url: URL) {
+        guard url.path.contains("UntitledDrafts") else { return }
+        try? FileManager.default.removeItem(at: url)
+        // Update the saved drafts list
+        var paths = UserDefaults.standard.stringArray(forKey: draftsKey) ?? []
+        paths.removeAll { $0 == url.path }
+        UserDefaults.standard.set(paths, forKey: draftsKey)
+    }
+
+    /// Remove all draft files (called when all drafts have been restored).
+    static func cleanupAllDrafts() {
+        let paths = UserDefaults.standard.stringArray(forKey: draftsKey) ?? []
+        for path in paths {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        UserDefaults.standard.removeObject(forKey: draftsKey)
+    }
+
     static var shouldShowWelcomeDocument: Bool {
         !UserDefaults.standard.bool(forKey: didShowWelcomeDocumentKey)
     }
 
     static func markWelcomeDocumentShown() {
         UserDefaults.standard.set(true, forKey: didShowWelcomeDocumentKey)
-    }
-
-    private static func orderedOpenDocumentURLs() -> [URL] {
-        cleanupWindowStores()
-
-        var urls: [URL] = []
-        var seenWindows = Set<ObjectIdentifier>()
-
-        for window in NSApp.windows {
-            let tabWindows = window.tabGroup?.windows ?? [window]
-            for tabWindow in tabWindows {
-                let id = ObjectIdentifier(tabWindow)
-                guard seenWindows.insert(id).inserted,
-                      tabWindow.isVisible,
-                      let store = windowStores[id]?.store,
-                      let url = store.document?.fileURL else { continue }
-                urls.append(url)
-            }
-        }
-
-        return urls
     }
 
     private static func cleanupWindowStores() {
@@ -295,11 +419,23 @@ struct DocumentWindowView: View {
                     store.loadUntitledCopy(root: copy.root, displayName: copy.displayName)
                     wrapStoreInDocument()
                     store.document?.displayName = (copy.displayName as NSString).deletingPathExtension
+                } else if let item = SessionState.pendingRestoreItems.first {
+                    // This window was created during session restoration
+                    SessionState.pendingRestoreItems.removeFirst()
+                    if item.isDraft {
+                        loadDraft(from: item.url)
+                    } else {
+                        store.loadFile(from: item.url)
+                        wrapStoreInDocument(url: item.url)
+                    }
                 } else if let url = SessionState.pendingRestoreURLs.first {
-                    // This window was created during session restoration -- load its file
+                    // Legacy restore path
                     SessionState.pendingRestoreURLs.removeFirst()
                     store.loadFile(from: url)
                     wrapStoreInDocument(url: url)
+                } else if let url = SessionState.pendingRestoreDrafts.first {
+                    SessionState.pendingRestoreDrafts.removeFirst()
+                    loadDraft(from: url)
                 } else if let url = SessionState.pendingWorkflowyImportURLs.first {
                     SessionState.pendingWorkflowyImportURLs.removeFirst()
                     store.loadWorkflowyOPMLImport(from: url)
@@ -335,8 +471,25 @@ struct DocumentWindowView: View {
         }
     }
 
+    /// Load a draft file as an untitled document, then clean up the draft.
+    private func loadDraft(from draftURL: URL) {
+        guard let data = try? Data(contentsOf: draftURL),
+              let root = try? OPMLService.parse(data: data) else {
+            wrapStoreInDocument()
+            return
+        }
+        store.root = root
+        store.ensureEditableRoot()
+        store.resetViewState()
+        wrapStoreInDocument()
+        // Mark as dirty so the user is prompted to save
+        store.document?.updateChangeCount(.changeDone)
+        // Remove the draft file now that content is loaded
+        SessionState.cleanupDraft(at: draftURL)
+    }
+
     /// Restore previously open documents: load saved session state, open additional
-    /// tabs for each document beyond the first.
+    /// tabs for each document beyond the first. Preserves window/tab grouping.
     private func restoreSession() {
         let queuedURLs = SessionState.consumePendingOpenURLs()
         if !queuedURLs.isEmpty {
@@ -344,22 +497,46 @@ struct DocumentWindowView: View {
             return
         }
 
-        let savedURLs = SessionState.loadSavedDocuments()
+        let windowGroups = SessionState.loadSavedWindowGroups()
 
-        if !savedURLs.isEmpty {
-            // Load the first document into this window
-            store.loadFile(from: savedURLs[0])
-            wrapStoreInDocument(url: savedURLs[0])
+        if !windowGroups.isEmpty {
+            let firstGroup = windowGroups[0]
+            let firstEntry = firstGroup[0]
 
-            // Queue remaining URLs and open new windows/tabs for each
-            let remaining = Array(savedURLs.dropFirst())
-            if !remaining.isEmpty {
-                SessionState.pendingRestoreURLs = remaining
-                for _ in remaining {
-                    WindowTabCoordinator.requestNextWindowAsTab()
+            // Load the first entry of the first group into this window
+            if firstEntry.isDraft {
+                loadDraft(from: firstEntry.url)
+            } else {
+                store.loadFile(from: firstEntry.url)
+                wrapStoreInDocument(url: firstEntry.url)
+            }
+
+            // Queue remaining tabs in the first group
+            let remainingTabs = Array(firstGroup.dropFirst())
+            for entry in remainingTabs {
+                SessionState.pendingRestoreItems.append(
+                    SessionState.PendingRestoreItem(url: entry.url, isDraft: entry.isDraft, isNewWindow: false)
+                )
+                WindowTabCoordinator.requestNextWindowAsTab()
+                openWindow(id: "main")
+            }
+
+            // Queue subsequent groups as separate windows.
+            // Due to the async nature of window creation, we cannot reliably
+            // re-create tab groups beyond the first one during a single restore pass.
+            // Each entry opens as its own window; the user can re-tab them if desired.
+            for groupIndex in 1..<windowGroups.count {
+                let group = windowGroups[groupIndex]
+                for entry in group {
+                    SessionState.pendingRestoreItems.append(
+                        SessionState.PendingRestoreItem(url: entry.url, isDraft: entry.isDraft, isNewWindow: true)
+                    )
                     openWindow(id: "main")
                 }
             }
+
+            // Clean up any remaining draft files not referenced
+            SessionState.cleanupAllDrafts()
             return
         }
 

@@ -81,6 +81,18 @@ class StrataDocument: NSDocument {
     override func data(ofType typeName: String) throws -> Data {
         OPMLService.serialize(root: pendingSnapshot ?? store.root)
     }
+
+    // MARK: - External File Change Detection
+
+    override func presentedItemDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let url = self.fileURL else { return }
+            // Only auto-reload if the user has no unsaved edits
+            if !self.isDocumentEdited {
+                try? self.revert(toContentsOf: url, ofType: self.fileType ?? "org.opml.opml")
+            }
+        }
+    }
 }
 
 // MARK: - Thin Window Controller Bridge
