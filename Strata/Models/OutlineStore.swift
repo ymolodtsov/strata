@@ -5,11 +5,14 @@ import os.log
 
 private let strataLogger = Logger(subsystem: "family.ma.strata", category: "perf")
 private let strataLogFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Strata/perf.log")
+private let strataLogQueue = DispatchQueue(label: "family.ma.strata.perf-log", qos: .utility)
 
 func strataLog(_ message: String) {
     strataLogger.info("\(message, privacy: .public)")
     let line = "\(Date()): \(message)\n"
-    if let data = line.data(using: .utf8) {
+    guard let data = line.data(using: .utf8) else { return }
+
+    strataLogQueue.async {
         if FileManager.default.fileExists(atPath: strataLogFile.path) {
             if let handle = try? FileHandle(forWritingTo: strataLogFile) {
                 handle.seekToEndOfFile()
@@ -27,6 +30,7 @@ func strataLog(_ message: String) {
 class OutlineStore {
     static let nodePasteboardType = NSPasteboard.PasteboardType("family.ma.strata.nodes")
     private static let hideCompletedDefaultsKey = "hideCompletedItems"
+    private static let maxRenderedDepth = 64
     static let opmlContentType = UTType(filenameExtension: "opml")!
     static let markdownContentType = UTType(filenameExtension: "md")!
     static let markdownLongContentType = UTType(filenameExtension: "markdown")!
@@ -80,8 +84,18 @@ class OutlineStore {
 
     var root: OutlineNode
     var zoomPath: [UUID] = []
-    var pendingFocusId: UUID?
+    var pendingFocusId: UUID? {
+        didSet {
+            if oldValue != pendingFocusId {
+                shouldScrollToPendingFocus = false
+            }
+        }
+    }
+    var shouldScrollToPendingFocus = false
     var pendingCursorPosition: Int?
+    var editingNodeId: UUID?
+    var focusedEditorNodeId: UUID?
+    var hoveredRowId: UUID?
     var selectedNodeIds: Set<UUID> = []
 
     weak var document: StrataDocument?
@@ -165,11 +179,9 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        if let savedId = snap.focusedId, root.find(id: savedId) != nil {
-            pendingFocusId = savedId
-        } else {
-            pendingFocusId = currentRoot.children.first?.id
-        }
+        let focusId = snap.focusedId.flatMap { root.find(id: $0) != nil ? $0 : nil }
+            ?? currentRoot.children.first?.id
+        requestFocus(focusId, scroll: true)
     }
 
     var documentTitle: String {
@@ -185,7 +197,17 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        pendingFocusId = root.children.first?.id
+        requestFocus(root.children.first?.id, scroll: false)
+    }
+
+    func requestFocus(_ nodeId: UUID?, cursorPosition: Int? = nil, scroll: Bool = true) {
+        pendingFocusId = nodeId
+        pendingCursorPosition = cursorPosition
+        shouldScrollToPendingFocus = scroll
+    }
+
+    func clearPendingFocus() {
+        requestFocus(nil, scroll: false)
     }
 
     static func displayName(for url: URL) -> String {
@@ -247,9 +269,9 @@ class OutlineStore {
             let empty = OutlineNode(text: "")
             empty.parent = node
             node.children.append(empty)
-            pendingFocusId = empty.id
+            requestFocus(empty.id, scroll: true)
         } else {
-            pendingFocusId = node.children.first?.id
+            requestFocus(node.children.first?.id, scroll: true)
         }
     }
 
@@ -318,54 +340,57 @@ class OutlineStore {
         var result: [(OutlineNode, Int)] = []
         if isSearching {
             let matches = searchMatchingIds(in: currentRoot, query: searchQuery.lowercased())
-            for child in currentRoot.children {
-                flattenMatching(child, depth: 0, matches: matches, into: &result)
-            }
+            flattenMatchingChildren(of: currentRoot, matches: matches, into: &result)
         } else {
-            for child in currentRoot.children {
-                flattenVisible(child, depth: 0, into: &result)
-            }
+            flattenVisibleChildren(of: currentRoot, into: &result)
         }
         return result
     }
 
-    private func flattenVisible(_ node: OutlineNode, depth: Int, into result: inout [(OutlineNode, Int)]) {
-        if hideCompleted && node.isDone { return }
-        result.append((node, depth))
-        if node.isExpanded {
-            for child in node.children {
-                flattenVisible(child, depth: depth + 1, into: &result)
+    private func flattenVisibleChildren(of root: OutlineNode, into result: inout [(OutlineNode, Int)]) {
+        var stack = root.children.reversed().map { (node: $0, depth: 0) }
+        while let item = stack.popLast() {
+            if hideCompleted && item.node.isDone { continue }
+            result.append((item.node, min(item.depth, Self.maxRenderedDepth)))
+            if item.node.isExpanded {
+                for child in item.node.children.reversed() {
+                    stack.append((child, item.depth + 1))
+                }
             }
         }
     }
 
     private func searchMatchingIds(in root: OutlineNode, query: String) -> Set<UUID> {
         var ids = Set<UUID>()
-        searchMatchHelper(root, query: query, ids: &ids)
+        var stack: [OutlineNode] = [root]
+        while let node = stack.popLast() {
+            let textMatch = node.text.lowercased().contains(query)
+            let noteMatch = node.note.lowercased().contains(query)
+            if textMatch || noteMatch {
+                var current: OutlineNode? = node
+                while let n = current {
+                    ids.insert(n.id)
+                    current = n.parent
+                }
+            }
+            stack.append(contentsOf: node.children)
+        }
         return ids
     }
 
-    private func searchMatchHelper(_ node: OutlineNode, query: String, ids: inout Set<UUID>) {
-        let textMatch = node.text.lowercased().contains(query)
-        let noteMatch = node.note.lowercased().contains(query)
-        if textMatch || noteMatch {
-            var current: OutlineNode? = node
-            while let n = current {
-                ids.insert(n.id)
-                current = n.parent
+    private func flattenMatchingChildren(
+        of root: OutlineNode,
+        matches: Set<UUID>,
+        into result: inout [(OutlineNode, Int)]
+    ) {
+        var stack = root.children.reversed().map { (node: $0, depth: 0) }
+        while let item = stack.popLast() {
+            guard matches.contains(item.node.id) else { continue }
+            if hideCompleted && item.node.isDone { continue }
+            result.append((item.node, min(item.depth, Self.maxRenderedDepth)))
+            for child in item.node.children.reversed() {
+                stack.append((child, item.depth + 1))
             }
-        }
-        for child in node.children {
-            searchMatchHelper(child, query: query, ids: &ids)
-        }
-    }
-
-    private func flattenMatching(_ node: OutlineNode, depth: Int, matches: Set<UUID>, into result: inout [(OutlineNode, Int)]) {
-        guard matches.contains(node.id) else { return }
-        if hideCompleted && node.isDone { return }
-        result.append((node, depth))
-        for child in node.children {
-            flattenMatching(child, depth: depth + 1, matches: matches, into: &result)
         }
     }
 
@@ -410,8 +435,7 @@ class OutlineStore {
         selectedNodeIds = Set(nodeIds)
         selectionAnchorId = nodeIds.first
         selectionCursorId = nodeIds.last
-        pendingFocusId = nil
-        pendingCursorPosition = nil
+        clearPendingFocus()
         NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
@@ -554,9 +578,12 @@ class OutlineStore {
         }
     }
 
-    func focusNodeForEditing(_ nodeId: UUID) {
-        pendingFocusId = nodeId
-        pendingCursorPosition = nil
+    func focusNodeForEditing(_ nodeId: UUID, scroll: Bool = false) {
+        if focusedEditorNodeId != nodeId {
+            focusedEditorNodeId = nil
+        }
+        editingNodeId = nodeId
+        requestFocus(nodeId, scroll: scroll)
         clearSelection()
     }
 
@@ -578,26 +605,23 @@ class OutlineStore {
         }
 
         // Group by parent and sort by descending index to avoid invalidation
-        var parentMap: [UUID: [(index: Int, nodeId: UUID)]] = [:]
-        for id in selectedNodeIds {
-            guard let node = root.find(id: id),
-                  let parent = node.parent,
+        var parentMap: [UUID: (parent: OutlineNode, entries: [(index: Int, nodeId: UUID)])] = [:]
+        for item in visibleBefore where selectedNodeIds.contains(item.node.id) {
+            let node = item.node
+            guard let parent = node.parent,
                   !selectedNodeIds.contains(parent.id),
-                  let index = parent.indexOfChild(id) else { continue }
-            parentMap[parent.id, default: []].append((index, id))
+                  let index = parent.indexOfChild(node.id) else { continue }
+            parentMap[parent.id, default: (parent, [])].entries.append((index, node.id))
         }
         guard !parentMap.isEmpty else { return }
 
         saveUndoState()
 
-        for (_, entries) in parentMap {
-            let sorted = entries.sorted { $0.index > $1.index }
+        for (_, group) in parentMap {
+            let sorted = group.entries.sorted { $0.index > $1.index }
             for entry in sorted {
-                if let node = root.find(id: entry.nodeId),
-                   let parent = node.parent {
-                    if let idx = parent.indexOfChild(entry.nodeId) {
-                        parent.children.remove(at: idx)
-                    }
+                if let idx = group.parent.indexOfChild(entry.nodeId) {
+                    group.parent.children.remove(at: idx)
                 }
             }
         }
@@ -609,7 +633,7 @@ class OutlineStore {
             let empty = OutlineNode(text: "")
             empty.parent = cr
             cr.children.append(empty)
-            pendingFocusId = empty.id
+            requestFocus(empty.id, scroll: true)
             clearSelection()
         } else if let firstDeletedVisibleIndex {
             let visibleAfter = visibleNodes()
@@ -627,7 +651,9 @@ class OutlineStore {
     }
 
     func toggleDoneSelected() {
-        let selected = selectedNodeIds.compactMap { root.find(id: $0) }
+        let selected = visibleNodes()
+            .map(\.node)
+            .filter { selectedNodeIds.contains($0.id) }
         guard !selected.isEmpty else { return }
 
         saveUndoState()
@@ -916,7 +942,7 @@ class OutlineStore {
         guard !items.isEmpty else { return [] }
 
         let baseIndent = items[0].indent
-        items = items.map { ($0.text, max(0, $0.indent - baseIndent)) }
+        items = items.map { ($0.text, min(Self.maxRenderedDepth, max(0, $0.indent - baseIndent))) }
 
         var stack: [(OutlineNode, Int)] = []
         var topLevel: [OutlineNode] = []
@@ -941,16 +967,15 @@ class OutlineStore {
 
     @discardableResult
     private func insertNodes(_ topLevel: [OutlineNode], into parent: OutlineNode, at index: Int) -> [UUID] {
-        var insertedIds: [UUID] = []
-        for (offset, node) in topLevel.enumerated() {
+        let insertionIndex = min(max(index, 0), parent.children.count)
+        for node in topLevel {
             node.parent = parent
-            parent.children.insert(node, at: min(index + offset, parent.children.count))
-            insertedIds.append(node.id)
         }
+        parent.children.insert(contentsOf: topLevel, at: insertionIndex)
         if let last = topLevel.last {
-            pendingFocusId = last.id
+            requestFocus(last.id, scroll: false)
         }
-        return insertedIds
+        return topLevel.map(\.id)
     }
 
     func pasteAfterSelection() {
@@ -1175,8 +1200,7 @@ class OutlineStore {
         let newNode = OutlineNode(text: afterText, formatting: splitFormatting.after)
         newNode.parent = parent
         parent.children.insert(newNode, at: index + 1)
-        pendingFocusId = newNode.id
-        pendingCursorPosition = 0
+        requestFocus(newNode.id, cursorPosition: 0, scroll: false)
         scheduleSave()
     }
 
@@ -1221,8 +1245,7 @@ class OutlineStore {
             parent.children.remove(at: childIdx)
         }
 
-        pendingFocusId = prevNode.id
-        pendingCursorPosition = mergePoint
+        requestFocus(prevNode.id, cursorPosition: mergePoint, scroll: false)
         scheduleSave()
     }
 
@@ -1241,7 +1264,7 @@ class OutlineStore {
         newNode.parent = node
         node.children.insert(newNode, at: 0)
         node.isExpanded = true
-        pendingFocusId = newNode.id
+        requestFocus(newNode.id, scroll: false)
         scheduleSave()
         return newNode.id
     }
@@ -1251,7 +1274,7 @@ class OutlineStore {
         guard canIndent(nodeId: nodeId) else { return false }
         saveUndoState()
         guard indentNodeWithoutUndo(nodeId: nodeId) else { return false }
-        pendingFocusId = nodeId
+        requestFocus(nodeId, scroll: false)
         scheduleSave()
         return true
     }
@@ -1283,7 +1306,7 @@ class OutlineStore {
         guard canUnindent(nodeId: nodeId) else { return false }
         saveUndoState()
         guard unindentNodeWithoutUndo(nodeId: nodeId) else { return false }
-        pendingFocusId = nodeId
+        requestFocus(nodeId, scroll: false)
         scheduleSave()
         return true
     }
@@ -1363,11 +1386,11 @@ class OutlineStore {
         pruneZoomPath()
 
         if index > 0 {
-            pendingFocusId = parent.children[index - 1].id
+            requestFocus(parent.children[index - 1].id, scroll: false)
         } else if !parent.children.isEmpty {
-            pendingFocusId = parent.children[0].id
+            requestFocus(parent.children[0].id, scroll: false)
         } else if parent.id != root.id {
-            pendingFocusId = parent.id
+            requestFocus(parent.id, scroll: false)
         }
         scheduleSave()
     }
@@ -1381,7 +1404,7 @@ class OutlineStore {
 
         saveUndoState()
         parent.children.swapAt(index, index - 1)
-        pendingFocusId = node.id
+        requestFocus(node.id, scroll: false)
         scheduleSave()
         return true
     }
@@ -1395,7 +1418,7 @@ class OutlineStore {
 
         saveUndoState()
         parent.children.swapAt(index, index + 1)
-        pendingFocusId = node.id
+        requestFocus(node.id, scroll: false)
         scheduleSave()
         return true
     }
@@ -1436,7 +1459,7 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        pendingFocusId = root.children.first?.id
+        requestFocus(root.children.first?.id, scroll: false)
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
     }
 
@@ -1488,7 +1511,7 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        pendingFocusId = root.children.first?.id
+        requestFocus(root.children.first?.id, scroll: false)
     }
 
     static func parseOutlineText(_ text: String, title: String, markdown: Bool) -> OutlineNode {
@@ -1501,7 +1524,11 @@ class OutlineStore {
                 rootTitle = String(parsed.text.dropFirst(2)).trimmingCharacters(in: .whitespaces)
                 continue
             }
-            entries.append(parsed)
+            entries.append((
+                indent: min(Self.maxRenderedDepth, parsed.indent),
+                text: parsed.text,
+                isDone: parsed.isDone
+            ))
         }
 
         let root = OutlineNode(text: rootTitle.isEmpty ? "Imported Outline" : rootTitle)
@@ -1615,7 +1642,7 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        pendingFocusId = root.children.first?.id
+        requestFocus(root.children.first?.id, scroll: false)
     }
 
     @discardableResult
@@ -1634,7 +1661,7 @@ class OutlineStore {
         dropTargetId = nil
         dropAsChild = false
         treeModifiedSinceLastSnapshot = true
-        pendingFocusId = root.children.first?.id
+        requestFocus(root.children.first?.id, scroll: false)
         return true
     }
 

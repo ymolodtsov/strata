@@ -1,6 +1,8 @@
 import Foundation
 
 enum OPMLService {
+    private static let maxPrettyPrintIndent = 64
+
     enum ParseError: Error {
         case invalidXML
     }
@@ -31,9 +33,7 @@ enum OPMLService {
         xml += "    <title>\(escapeXML(root.text))</title>\n"
         xml += "  </head>\n"
         xml += "  <body>\n"
-        for child in root.children {
-            serializeNode(child, indent: 2, into: &xml)
-        }
+        serializeChildren(root.children, indent: 2, into: &xml)
         xml += "  </body>\n"
         xml += "</opml>\n"
         return xml.data(using: .utf8) ?? Data()
@@ -42,25 +42,51 @@ enum OPMLService {
     private static func estimatedSerializedSize(root: OutlineNode) -> Int {
         var total = 160 + root.text.utf8.count
 
-        func visit(_ node: OutlineNode, depth: Int) {
-            total += 64 + (depth * 4) + node.text.utf8.count + node.note.utf8.count
-            total += node.formatting.count * 80
-            for child in node.children {
-                visit(child, depth: depth + 1)
+        var stack = root.children.reversed().map { (node: $0, depth: 2) }
+        while let item = stack.popLast() {
+            total += 64 + (min(item.depth, maxPrettyPrintIndent) * 4) + item.node.text.utf8.count + item.node.note.utf8.count
+            total += item.node.formatting.count * 80
+            for child in item.node.children.reversed() {
+                stack.append((child, item.depth + 1))
             }
-        }
-
-        for child in root.children {
-            visit(child, depth: 2)
         }
 
         return total
     }
 
-    private static func serializeNode(_ node: OutlineNode, indent: Int, into xml: inout String) {
-        guard !isEmptyLeaf(node) else { return }
+    private enum SerializeEvent {
+        case node(OutlineNode, Int)
+        case close(Int)
+    }
 
-        let pad = String(repeating: "  ", count: indent)
+    private static func serializeChildren(_ children: [OutlineNode], indent: Int, into xml: inout String) {
+        var stack = children.reversed().map { SerializeEvent.node($0, indent) }
+
+        while let event = stack.popLast() {
+            switch event {
+            case let .node(node, depth):
+                guard !isEmptyLeaf(node) else { continue }
+
+                let pad = String(repeating: "  ", count: min(depth, maxPrettyPrintIndent))
+                let attrs = outlineAttributes(for: node)
+
+                if node.children.isEmpty {
+                    xml += "\(pad)<outline \(attrs)/>\n"
+                } else {
+                    xml += "\(pad)<outline \(attrs)>\n"
+                    stack.append(.close(depth))
+                    for child in node.children.reversed() {
+                        stack.append(.node(child, depth + 1))
+                    }
+                }
+            case let .close(depth):
+                let pad = String(repeating: "  ", count: min(depth, maxPrettyPrintIndent))
+                xml += "\(pad)</outline>\n"
+            }
+        }
+    }
+
+    private static func outlineAttributes(for node: OutlineNode) -> String {
         var attrs = "text=\"\(escapeXML(node.text))\""
 
         let formatting = node.formatting.normalized(forTextLength: (node.text as NSString).length)
@@ -79,15 +105,7 @@ enum OPMLService {
             attrs += " _collapsed=\"true\""
         }
 
-        if node.children.isEmpty {
-            xml += "\(pad)<outline \(attrs)/>\n"
-        } else {
-            xml += "\(pad)<outline \(attrs)>\n"
-            for child in node.children {
-                serializeNode(child, indent: indent + 1, into: &xml)
-            }
-            xml += "\(pad)</outline>\n"
-        }
+        return attrs
     }
 
     private static func isEmptyLeaf(_ node: OutlineNode) -> Bool {
@@ -296,18 +314,19 @@ private class OPMLParser: NSObject, XMLParserDelegate {
                     parsedKnownTag = true
                 } else {
                     let kinds = formattingKinds(for: tag.name, attributes: tag.attributes)
-                    guard !kinds.isEmpty else { continue }
-                    parsedKnownTag = true
-                    if tag.isClosing {
-                        closeTag(named: tag.name, currentLocation: currentLocation(), openTags: &openTags, formatting: &formatting)
-                    } else if !tag.isSelfClosing {
-                        for kind in kinds {
-                            openTags.append(OpenFormattingTag(
-                                tagName: tag.name,
-                                kind: kind,
-                                location: currentLocation(),
-                                url: kind == .link ? tag.attributes["href"] : nil
-                            ))
+                    if !kinds.isEmpty {
+                        parsedKnownTag = true
+                        if tag.isClosing {
+                            closeTag(named: tag.name, currentLocation: currentLocation(), openTags: &openTags, formatting: &formatting)
+                        } else if !tag.isSelfClosing {
+                            for kind in kinds {
+                                openTags.append(OpenFormattingTag(
+                                    tagName: tag.name,
+                                    kind: kind,
+                                    location: currentLocation(),
+                                    url: kind == .link ? tag.attributes["href"] : nil
+                                ))
+                            }
                         }
                     }
                 }

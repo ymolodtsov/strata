@@ -1,18 +1,23 @@
 import Foundation
 
 enum ExportService {
+    private static let maxExportIndent = 64
 
     // MARK: - Plain Text (tab-indented)
 
     static func plainText(root: OutlineNode) -> String {
         var lines: [String] = []
-        for child in root.children {
-            appendPlainText(child, indent: 0, into: &lines)
+        var stack = root.children.reversed().map { (node: $0, indent: 0) }
+        while let item = stack.popLast() {
+            appendPlainTextLine(item.node, indent: min(item.indent, maxExportIndent), into: &lines)
+            for child in item.node.children.reversed() {
+                stack.append((child, item.indent + 1))
+            }
         }
         return lines.joined(separator: "\n")
     }
 
-    private static func appendPlainText(_ node: OutlineNode, indent: Int, into lines: inout [String]) {
+    private static func appendPlainTextLine(_ node: OutlineNode, indent: Int, into lines: inout [String]) {
         let prefix = String(repeating: "\t", count: indent)
         let marker = node.isDone ? "[x] " : ""
         lines.append("\(prefix)\(marker)\(node.text)")
@@ -20,9 +25,6 @@ enum ExportService {
             for noteLine in node.note.components(separatedBy: .newlines) {
                 lines.append("\(prefix)\t\(noteLine)")
             }
-        }
-        for child in node.children {
-            appendPlainText(child, indent: indent + 1, into: &lines)
         }
     }
 
@@ -35,13 +37,17 @@ enum ExportService {
             lines.append("# \(root.text)")
             lines.append("")
         }
-        for child in root.children {
-            appendMarkdown(child, indent: 0, into: &lines)
+        var stack = root.children.reversed().map { (node: $0, indent: 0) }
+        while let item = stack.popLast() {
+            appendMarkdownLine(item.node, indent: min(item.indent, maxExportIndent), into: &lines)
+            for child in item.node.children.reversed() {
+                stack.append((child, item.indent + 1))
+            }
         }
         return lines.joined(separator: "\n")
     }
 
-    private static func appendMarkdown(_ node: OutlineNode, indent: Int, into lines: inout [String]) {
+    private static func appendMarkdownLine(_ node: OutlineNode, indent: Int, into lines: inout [String]) {
         let prefix = String(repeating: "  ", count: indent)
         let checkbox = node.isDone ? "- [x] " : "- "
         lines.append("\(prefix)\(checkbox)\(formattedMarkdown(node.text, formatting: node.formatting))")
@@ -49,9 +55,6 @@ enum ExportService {
             for noteLine in node.note.components(separatedBy: .newlines) {
                 lines.append("\(prefix)  \(noteLine)")
             }
-        }
-        for child in node.children {
-            appendMarkdown(child, indent: indent + 1, into: &lines)
         }
     }
 
@@ -75,29 +78,46 @@ enum ExportService {
         }
         if !root.children.isEmpty {
             html += "<ul>\n"
-            for child in root.children {
-                appendHTML(child, into: &html)
-            }
+            appendHTMLChildren(root.children, into: &html)
             html += "</ul>\n"
         }
         html += "</body>\n</html>\n"
         return html
     }
 
-    private static func appendHTML(_ node: OutlineNode, into html: inout String) {
-        let cls = node.isDone ? " class=\"done\"" : ""
-        html += "<li\(cls)>\(formattedHTML(node.text, formatting: node.formatting))"
-        if !node.note.isEmpty {
-            html += "\n<div class=\"note\">\(escapeHTML(node.note))</div>"
-        }
-        if !node.children.isEmpty {
-            html += "\n<ul>\n"
-            for child in node.children {
-                appendHTML(child, into: &html)
+    private enum HTMLEvent {
+        case node(OutlineNode)
+        case closeChildren
+        case closeItem
+    }
+
+    private static func appendHTMLChildren(_ children: [OutlineNode], into html: inout String) {
+        var stack = children.reversed().map { HTMLEvent.node($0) }
+
+        while let event = stack.popLast() {
+            switch event {
+            case let .node(node):
+                let cls = node.isDone ? " class=\"done\"" : ""
+                html += "<li\(cls)>\(formattedHTML(node.text, formatting: node.formatting))"
+                if !node.note.isEmpty {
+                    html += "\n<div class=\"note\">\(escapeHTML(node.note))</div>"
+                }
+                if node.children.isEmpty {
+                    html += "</li>\n"
+                } else {
+                    html += "\n<ul>\n"
+                    stack.append(.closeItem)
+                    stack.append(.closeChildren)
+                    for child in node.children.reversed() {
+                        stack.append(.node(child))
+                    }
+                }
+            case .closeChildren:
+                html += "</ul>\n"
+            case .closeItem:
+                html += "</li>\n"
             }
-            html += "</ul>\n"
         }
-        html += "</li>\n"
     }
 
     private static func escapeHTML(_ string: String) -> String {
@@ -172,19 +192,27 @@ enum ExportService {
 
         let sortedBoundaries = boundaries.sorted()
         var output = ""
+        var activeSpans: [TextFormattingSpan] = []
+        var nextSpanIndex = 0
 
         for index in 0..<(sortedBoundaries.count - 1) {
             let start = sortedBoundaries[index]
             let end = sortedBoundaries[index + 1]
             guard end > start else { continue }
 
+            activeSpans.removeAll { $0.location + $0.length <= start }
+            while nextSpanIndex < spans.count, spans[nextSpanIndex].location <= start {
+                activeSpans.append(spans[nextSpanIndex])
+                nextSpanIndex += 1
+            }
+
             let segment = nsText.substring(with: NSRange(location: start, length: end - start))
-            let activeSpans = spans
-                .filter { $0.location <= start && $0.location + $0.length >= end }
+            let segmentSpans = activeSpans
+                .filter { $0.location + $0.length >= end }
                 .sorted { lhs, rhs in
                     formattingSortOrder(lhs.kind) < formattingSortOrder(rhs.kind)
                 }
-            output += renderSegment(segment, activeSpans)
+            output += renderSegment(segment, segmentSpans)
         }
 
         return output

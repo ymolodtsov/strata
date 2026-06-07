@@ -16,10 +16,15 @@ private enum OutlineLayoutMetrics {
     static let chevronXOffset: CGFloat = 3
     static let controlTopOffset: CGFloat = -2
     static let textTopOffset: CGFloat = 1
+    static let passiveTextBaselineCorrection: CGFloat = -2
     static let rowVerticalPadding: CGFloat = 2
 
     static func textLeading(forDepth depth: Int) -> CGFloat {
         CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + bulletWidth + textGap
+    }
+
+    static func guideX(forDepth depth: Int) -> CGFloat {
+        CGFloat(depth) * indentWidth + checkboxWidth + chevronWidth + (bulletWidth / 2)
     }
 }
 
@@ -33,30 +38,33 @@ struct NodeRowView: View {
     let dropAbove: Bool
     let dropAsChild: Bool
     let hasSelection: Bool
+    let isEditing: Bool
+    let isEditorReady: Bool
     let shouldFocus: Bool
     let cursorPosition: Int?
     let searchQuery: String
     let dragCount: Int
-    @State private var isHovered = false
+    let isDragActive: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             // Indentation with hierarchy guide lines
             if depth > 0 {
-                HierarchyIndentGuide(depth: depth)
+                Spacer()
                     .frame(width: CGFloat(depth) * OutlineLayoutMetrics.indentWidth)
             }
 
-            // Checkbox — visible on hover or when done
+            // Checkbox - unchecked controls are visible only while the row is
+            // hovered. Hover tracking is handled by AppKit below, not SwiftUI.
             ZStack {
                 if node.isDone {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: OutlineLayoutMetrics.checkboxIconSize))
                         .foregroundStyle(Color.primary.opacity(0.3))
-                } else if isHovered {
+                } else if store.hoveredRowId == node.id {
                     Image(systemName: "circle")
                         .font(.system(size: OutlineLayoutMetrics.checkboxIconSize))
-                        .foregroundStyle(Color.primary.opacity(0.12))
+                        .foregroundStyle(Color.primary.opacity(0.08))
                 }
             }
             .frame(width: OutlineLayoutMetrics.checkboxWidth, height: OutlineLayoutMetrics.controlHeight)
@@ -87,6 +95,7 @@ struct NodeRowView: View {
 
             // Bullet — always present, click to focus/zoom in, drag handle
             ZStack {
+                let isHovered = store.hoveredRowId == node.id
                 Circle()
                     .stroke(Color.primary.opacity(isHovered ? 0.18 : 0), lineWidth: 1.25)
                     .frame(
@@ -98,7 +107,7 @@ struct NodeRowView: View {
                     .fill(Color.primary.opacity(isHovered ? 0.35 : 0.22))
                     .frame(width: OutlineLayoutMetrics.bulletSize, height: OutlineLayoutMetrics.bulletSize)
             }
-            .animation(.easeInOut(duration: 0.12), value: isHovered)
+            .animation(.easeInOut(duration: 0.12), value: store.hoveredRowId)
             .frame(width: OutlineLayoutMetrics.bulletWidth, height: OutlineLayoutMetrics.controlHeight)
             .offset(y: OutlineLayoutMetrics.controlTopOffset)
             .contentShape(Rectangle())
@@ -114,90 +123,16 @@ struct NodeRowView: View {
             Spacer().frame(width: OutlineLayoutMetrics.textGap)
 
             ZStack(alignment: .leading) {
-                OutlineTextField(
-                    nodeId: node.id,
-                    text: Binding(
-                        get: { node.text },
-                        set: { node.text = $0 }
-                    ),
-                    formatting: Binding(
-                        get: { node.formatting },
-                        set: { node.formatting = $0 }
-                    ),
-                    isDone: node.isDone,
-                    shouldFocus: shouldFocus,
-                    cursorPosition: cursorPosition,
-                    onCommit: { cursorOffset in
-                        store.splitAndInsert(after: node.id, cursorOffset: cursorOffset)
-                    },
-                    onTab: { store.indent(nodeId: node.id) },
-                    onBackTab: { store.unindent(nodeId: node.id) },
-                    onMoveUp: {
-                        if let prevId = store.previousVisibleNode(before: node.id) {
-                            store.pendingFocusId = prevId
+                passiveText
+                    .opacity(isEditorReady ? 0 : 1)
+                    .allowsHitTesting(!isEditing && !hasSelection)
+                    .overlay(alignment: .topLeading) {
+                        if isEditing {
+                            editableText
+                                .opacity(isEditorReady ? 1 : 0)
+                                .allowsHitTesting(isEditorReady && !hasSelection)
                         }
-                    },
-                    onMoveDown: {
-                        if let nextId = store.nextVisibleNode(after: node.id) {
-                            store.pendingFocusId = nextId
-                        }
-                    },
-                    onDelete: { store.deleteNode(nodeId: node.id) },
-                    onMergeWithPrevious: { store.mergeWithPrevious(nodeId: node.id) },
-                    onToggleDone: { store.toggleDone(nodeId: node.id) },
-                    onToggleNote: { store.toggleNote(nodeId: node.id) },
-                    onMoveNodeUp: { store.moveUp(nodeId: node.id) },
-                    onMoveNodeDown: { store.moveDown(nodeId: node.id) },
-                    onZoomIn: { store.zoomIn(nodeId: node.id) },
-                    onEscape: {
-                        if hasSelection {
-                            store.clearSelection()
-                        } else if store.isSearchActive {
-                            store.isSearchActive = false
-                            store.searchQuery = ""
-                        } else {
-                            // Exit editing → enter selection mode with this node selected.
-                            // User can then navigate with Up/Down, extend with Shift+Up/Down,
-                            // press Enter to edit, or Escape again to fully deselect.
-                            store.selectNode(node.id)
-                        }
-                    },
-                    onDidFocus: {
-                        if store.pendingFocusId == node.id {
-                            store.pendingFocusId = nil
-                            store.pendingCursorPosition = nil
-                        }
-                    },
-                    onTextChange: { store.scheduleSave() },
-                    onSelectAllNodes: { store.selectAllVisible() },
-                    onBeginEditing: {
-                        store.clearSelection()
-                        store.saveUndoStateIfModified()
-                    },
-                    onShiftUp: {
-                        if store.hasSelection {
-                            store.extendSelectionUp()
-                        } else {
-                            store.startSelectionUp(from: node.id)
-                        }
-                    },
-                    onShiftDown: {
-                        if store.hasSelection {
-                            store.extendSelectionDown()
-                        } else {
-                            store.startSelectionDown(from: node.id)
-                        }
-                    },
-                    onPasteNodes: { store.pasteNodes(after: node.id) },
-                    onUndo: { store.undo() },
-                    onRedo: { store.redo() },
-                    onStructuralEditForUndo: { store.markStructuralEditForUndoRoute() },
-                    shouldRouteStructuralUndoToStore: { store.shouldRouteStructuralUndoToStore },
-                    shouldRouteStructuralRedoToStore: { store.shouldRouteStructuralRedoToStore },
-                    searchQuery: searchQuery
-                )
-                .id(node.id)
-                .allowsHitTesting(!hasSelection)
+                    }
 
                 if hasSelection {
                     Color.clear
@@ -214,6 +149,9 @@ struct NodeRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .offset(y: OutlineLayoutMetrics.textTopOffset)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
 
             // Note indicator
             if !node.note.isEmpty {
@@ -225,6 +163,17 @@ struct NodeRowView: View {
         }
         .padding(.vertical, OutlineLayoutMetrics.rowVerticalPadding)
         .padding(.trailing, 8)
+        .background(RowHoverTrackingView { hovered in
+            if hovered {
+                store.hoveredRowId = node.id
+            } else if store.hoveredRowId == node.id {
+                store.hoveredRowId = nil
+            }
+        })
+        .overlay(alignment: .topLeading) {
+            HierarchyGuideOverlay(depth: depth)
+                .allowsHitTesting(false)
+        }
         .background(
             Group {
                 if isSelected {
@@ -242,15 +191,12 @@ struct NodeRowView: View {
                     .padding(.leading, dropIndicatorLeadingPadding)
             }
         }
-        .onDrop(of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, depth: depth, store: store))
-        .onHover { isHovered = $0 }
-        .contentShape(Rectangle())
+        .droppableWhenDragging(isDragActive, of: [.plainText], delegate: NodeDropDelegate(nodeId: node.id, depth: depth, store: store))
         .draggableWhenSelected(isSelected, provider: {
             dragProvider()
         }, preview: {
             dragPreview
         })
-        .id(node.id)
     }
 
     private func handleBulletClick() {
@@ -271,6 +217,139 @@ struct NodeRowView: View {
         } else {
             store.selectNode(node.id)
         }
+    }
+
+    private func handlePassiveTextClick() {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.shift) || flags.contains(.command) {
+            store.handleNodeClick(node.id, modifiers: flags)
+        } else {
+            store.focusNodeForEditing(node.id)
+        }
+    }
+
+    private var passiveText: some View {
+        Group {
+            if node.text.isEmpty {
+                Text(" ")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.clear)
+            } else {
+                Text(OutlineTextField.displayAttributedString(
+                    from: node.text,
+                    formatting: node.formatting,
+                    isDone: node.isDone,
+                    searchQuery: searchQuery
+                ))
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, minHeight: OutlineLayoutMetrics.controlHeight, alignment: .leading)
+        .offset(y: OutlineLayoutMetrics.passiveTextBaselineCorrection)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            handlePassiveTextClick()
+        }
+    }
+
+    private var editableText: some View {
+        OutlineTextField(
+            nodeId: node.id,
+            text: Binding(
+                get: { node.text },
+                set: { node.text = $0 }
+            ),
+            formatting: Binding(
+                get: { node.formatting },
+                set: { node.formatting = $0 }
+            ),
+            isDone: node.isDone,
+            shouldFocus: shouldFocus,
+            cursorPosition: cursorPosition,
+            onCommit: { cursorOffset in
+                store.splitAndInsert(after: node.id, cursorOffset: cursorOffset)
+            },
+            onTab: { store.indent(nodeId: node.id) },
+            onBackTab: { store.unindent(nodeId: node.id) },
+            onMoveUp: {
+                if let prevId = store.previousVisibleNode(before: node.id) {
+                    store.focusedEditorNodeId = nil
+                    store.editingNodeId = prevId
+                    store.requestFocus(prevId, scroll: true)
+                }
+            },
+            onMoveDown: {
+                if let nextId = store.nextVisibleNode(after: node.id) {
+                    store.focusedEditorNodeId = nil
+                    store.editingNodeId = nextId
+                    store.requestFocus(nextId, scroll: true)
+                }
+            },
+            onDelete: { store.deleteNode(nodeId: node.id) },
+            onMergeWithPrevious: { store.mergeWithPrevious(nodeId: node.id) },
+            onToggleDone: { store.toggleDone(nodeId: node.id) },
+            onToggleNote: { store.toggleNote(nodeId: node.id) },
+            onMoveNodeUp: { store.moveUp(nodeId: node.id) },
+            onMoveNodeDown: { store.moveDown(nodeId: node.id) },
+            onZoomIn: { store.zoomIn(nodeId: node.id) },
+            onEscape: {
+                if hasSelection {
+                    store.clearSelection()
+                } else if store.isSearchActive {
+                    store.isSearchActive = false
+                    store.searchQuery = ""
+                } else {
+                    // Exit editing -> enter selection mode with this node selected.
+                    // User can then navigate with Up/Down, extend with Shift+Up/Down,
+                    // press Enter to edit, or Escape again to fully deselect.
+                    store.selectNode(node.id)
+                }
+            },
+            onDidFocus: {
+                store.editingNodeId = node.id
+                store.focusedEditorNodeId = node.id
+                if store.pendingFocusId == node.id {
+                    store.clearPendingFocus()
+                }
+            },
+            onTextChange: { store.scheduleSave() },
+            onSelectAllNodes: { store.selectAllVisible() },
+            onBeginEditing: {
+                store.editingNodeId = node.id
+                store.clearSelection()
+                store.saveUndoStateIfModified()
+            },
+            onEndEditing: {
+                if store.editingNodeId == node.id {
+                    store.editingNodeId = nil
+                }
+                if store.focusedEditorNodeId == node.id {
+                    store.focusedEditorNodeId = nil
+                }
+            },
+            onShiftUp: {
+                if store.hasSelection {
+                    store.extendSelectionUp()
+                } else {
+                    store.startSelectionUp(from: node.id)
+                }
+            },
+            onShiftDown: {
+                if store.hasSelection {
+                    store.extendSelectionDown()
+                } else {
+                    store.startSelectionDown(from: node.id)
+                }
+            },
+            onPasteNodes: { store.pasteNodes(after: node.id) },
+            onUndo: { store.undo() },
+            onRedo: { store.redo() },
+            onStructuralEditForUndo: { store.markStructuralEditForUndoRoute() },
+            shouldRouteStructuralUndoToStore: { store.shouldRouteStructuralUndoToStore },
+            shouldRouteStructuralRedoToStore: { store.shouldRouteStructuralRedoToStore },
+            searchQuery: searchQuery
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func dragProvider() -> NSItemProvider {
@@ -320,6 +399,64 @@ struct NodeRowView: View {
     }
 }
 
+private struct RowHoverTrackingView: NSViewRepresentable {
+    var onHoverChanged: (Bool) -> Void
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.onHoverChanged = onHoverChanged
+        return view
+    }
+
+    func updateNSView(_ nsView: TrackingView, context: Context) {
+        nsView.onHoverChanged = onHoverChanged
+    }
+
+    static func dismantleNSView(_ nsView: TrackingView, coordinator: ()) {
+        nsView.onHoverChanged?(false)
+        nsView.onHoverChanged = nil
+    }
+
+    final class TrackingView: NSView {
+        var onHoverChanged: ((Bool) -> Void)?
+        private var trackingArea: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingArea {
+                removeTrackingArea(trackingArea)
+            }
+            let options: NSTrackingArea.Options = [
+                .mouseEnteredAndExited,
+                .activeInKeyWindow,
+                .inVisibleRect
+            ]
+            let area = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            onHoverChanged?(true)
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            onHoverChanged?(false)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil {
+                onHoverChanged?(false)
+            }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+    }
+}
+
 
 private extension View {
     @ViewBuilder
@@ -330,6 +467,19 @@ private extension View {
     ) -> some View {
         if isSelected {
             self.onDrag(provider, preview: preview)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func droppableWhenDragging<D: DropDelegate>(
+        _ isDragging: Bool,
+        of supportedTypes: [UTType],
+        delegate: D
+    ) -> some View {
+        if isDragging {
+            self.onDrop(of: supportedTypes, delegate: delegate)
         } else {
             self
         }
@@ -444,9 +594,11 @@ struct FlatOutline: View {
         let hasSelection = !selectedIds.isEmpty
         let pendingFocusId = store.pendingFocusId
         let pendingCursorPosition = store.pendingCursorPosition
+        let editingNodeId = store.editingNodeId
+        let focusedEditorNodeId = store.focusedEditorNodeId
         let searchQuery = store.isSearchActive ? store.searchQuery : ""
 
-        LazyVStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 0) {
                     let isSelected = selectedIds.contains(item.node.id)
@@ -460,10 +612,13 @@ struct FlatOutline: View {
                         dropAbove: dropAbove,
                         dropAsChild: dropAsChild,
                         hasSelection: hasSelection,
+                        isEditing: editingNodeId == item.node.id || pendingFocusId == item.node.id,
+                        isEditorReady: focusedEditorNodeId == item.node.id,
                         shouldFocus: pendingFocusId == item.node.id,
                         cursorPosition: pendingFocusId == item.node.id ? pendingCursorPosition : nil,
                         searchQuery: searchQuery,
-                        dragCount: isSelected ? max(selectedCount, 1) : 1
+                        dragCount: isSelected ? max(selectedCount, 1) : 1,
+                        isDragActive: !draggedIds.isEmpty
                     )
                     if !item.node.note.isEmpty || store.editingNoteId == item.node.id {
                         NoteEditorView(node: item.node, depth: item.depth, store: store)
@@ -474,24 +629,23 @@ struct FlatOutline: View {
     }
 }
 
-/// Draws vertical guide lines at each indent level. Rendered per-row so no
-/// cross-row preference communication is needed — adjacent rows at the same
-/// depth draw at the same X position, producing a continuous vertical line.
-private struct HierarchyIndentGuide: View {
+/// Draws vertical guide lines at each ancestor level in row coordinates. This
+/// keeps the per-row approach but avoids clipping lines inside the indent spacer.
+private struct HierarchyGuideOverlay: View {
     let depth: Int
 
     var body: some View {
-        Canvas { context, size in
-            for level in 0..<depth {
-                let x = CGFloat(level) * OutlineLayoutMetrics.indentWidth
-                    + OutlineLayoutMetrics.checkboxWidth
-                    + OutlineLayoutMetrics.chevronWidth
-                    + (OutlineLayoutMetrics.bulletWidth / 2)
-                var path = Path()
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(.primary.opacity(0.08)), lineWidth: 1)
+        ZStack(alignment: .topLeading) {
+            if depth > 0 {
+                ForEach(0..<depth, id: \.self) { level in
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                        .offset(x: OutlineLayoutMetrics.guideX(forDepth: level))
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

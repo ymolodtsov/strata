@@ -26,6 +26,7 @@ struct OutlineTextField: NSViewRepresentable {
     var onTextChange: () -> Void
     var onSelectAllNodes: () -> Void
     var onBeginEditing: () -> Void
+    var onEndEditing: () -> Void
     var onShiftUp: () -> Void
     var onShiftDown: () -> Void
     var onPasteNodes: () -> Bool
@@ -155,19 +156,7 @@ struct OutlineTextField: NSViewRepresentable {
         }
     }
 
-    private static var applyStyleCount = 0
-    private static var applyStyleTimer: CFAbsoluteTime = 0
-
     private func applyStyle(_ tf: StrataTextField) {
-        if Self.applyStyleCount == 0 { Self.applyStyleTimer = CFAbsoluteTimeGetCurrent() }
-        Self.applyStyleCount += 1
-        DispatchQueue.main.async {
-            if Self.applyStyleCount > 0 {
-                strataLog(String(format: "[Strata Render] applyStyle called %d times in %.1fms", Self.applyStyleCount, (CFAbsoluteTimeGetCurrent() - Self.applyStyleTimer) * 1000))
-                Self.applyStyleCount = 0
-            }
-        }
-
         let font = Self.font
         let currentText = text
         let currentFormatting = formatting
@@ -274,7 +263,7 @@ struct OutlineTextField: NSViewRepresentable {
 
     // MARK: - Rich Text Styling
 
-    private static func styledAttributedString(
+    static func styledAttributedString(
         from text: String,
         baseFont: NSFont,
         baseColor: NSColor,
@@ -287,6 +276,25 @@ struct OutlineTextField: NSViewRepresentable {
         applyFormatting(formatting, to: attributed, baseFont: baseFont)
         applyDetectedLinks(to: attributed)
         return attributed
+    }
+
+    static func displayAttributedString(
+        from text: String,
+        formatting: [TextFormattingSpan],
+        isDone: Bool,
+        searchQuery: String
+    ) -> AttributedString {
+        let baseColor: NSColor = isDone ? .tertiaryLabelColor : .labelColor
+        let styled = NSMutableAttributedString(attributedString: styledAttributedString(
+            from: text,
+            baseFont: font,
+            baseColor: baseColor,
+            formatting: formatting
+        ))
+        if !searchQuery.isEmpty {
+            applySearchHighlight(to: styled, query: searchQuery)
+        }
+        return AttributedString(styled)
     }
 
     static func setStyledText(
@@ -486,7 +494,7 @@ struct OutlineTextField: NSViewRepresentable {
 
                 StrataTextField.currentEditingField = tf
                 editor.textContainerInset = .zero
-                editor.textContainer?.lineFragmentPadding = 2
+                editor.textContainer?.lineFragmentPadding = 0
                 editor.textContainer?.widthTracksTextView = true
                 editor.isHorizontallyResizable = false
                 editor.isVerticallyResizable = true
@@ -557,6 +565,7 @@ struct OutlineTextField: NSViewRepresentable {
                     StrataTextField.currentEditingField = nil
                 }
             }
+            parent.onEndEditing()
         }
 
         /// Restyle the text storage immediately after a text change to prevent
@@ -817,11 +826,8 @@ class StrataTextField: NSTextField {
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result, let editor = currentEditor() as? NSTextView {
-            // The _NSKeyboardFocusClipView positions the field editor slightly
-            // to the left of where the cell draws non-editing text.  A small
-            // lineFragmentPadding compensates so both modes align.
             editor.textContainerInset = .zero
-            editor.textContainer?.lineFragmentPadding = 2
+            editor.textContainer?.lineFragmentPadding = 0
             editor.textContainer?.widthTracksTextView = true
             editor.isHorizontallyResizable = false
             editor.isVerticallyResizable = true
@@ -848,6 +854,11 @@ class StrataTextField: NSTextField {
     private var cachedMeasureSignature = ""
     private var cachedMeasureHeight: CGFloat = 0
     private var cachedQuickKey: String?
+    private static let sharedMeasurementCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 8_000
+        return cache
+    }()
 
     // Style tracking to avoid redundant restyling in updateNSView
     var lastStyledText: String?
@@ -904,6 +915,16 @@ class StrataTextField: NSTextField {
             return cachedMeasureHeight
         }
 
+        let sharedCacheKey = measurementCacheKey(width: measurementWidth, signature: signature)
+        if let cachedHeight = Self.sharedMeasurementCache.object(forKey: sharedCacheKey) {
+            let height = CGFloat(cachedHeight.doubleValue)
+            cachedMeasureWidth = measurementWidth
+            cachedMeasureSignature = signature
+            cachedMeasureHeight = height
+            cachedQuickKey = stringValue
+            return height
+        }
+
         if attributed.length > 0 {
             attributed.addAttribute(
                 .paragraphStyle,
@@ -925,7 +946,7 @@ class StrataTextField: NSTextField {
         let textContainer = NSTextContainer(
             containerSize: NSSize(width: measurementWidth, height: CGFloat.greatestFiniteMagnitude)
         )
-        textContainer.lineFragmentPadding = 2
+        textContainer.lineFragmentPadding = 0
         textContainer.widthTracksTextView = false
         textContainer.heightTracksTextView = false
 
@@ -939,6 +960,7 @@ class StrataTextField: NSTextField {
         cachedMeasureSignature = signature
         cachedMeasureHeight = height
         cachedQuickKey = stringValue
+        Self.sharedMeasurementCache.setObject(NSNumber(value: Double(height)), forKey: sharedCacheKey)
         return height
     }
 
@@ -980,6 +1002,11 @@ class StrataTextField: NSTextField {
             }
         }
         return signature
+    }
+
+    private func measurementCacheKey(width: CGFloat, signature: String) -> NSString {
+        let pixelWidth = Int((width * 2).rounded())
+        return "\(pixelWidth)|\(signature)" as NSString
     }
 
     override func layout() {

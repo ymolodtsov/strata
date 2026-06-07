@@ -122,9 +122,10 @@ class OutlineNode: Identifiable {
     }
 
     func setDone(_ done: Bool) {
-        isDone = done
-        for child in children {
-            child.setDone(done)
+        var stack: [OutlineNode] = [self]
+        while let node = stack.popLast() {
+            node.isDone = done
+            stack.append(contentsOf: node.children)
         }
     }
 
@@ -133,9 +134,10 @@ class OutlineNode: Identifiable {
     }
 
     func find(id targetId: UUID) -> OutlineNode? {
-        if self.id == targetId { return self }
-        for child in children {
-            if let found = child.find(id: targetId) { return found }
+        var stack: [OutlineNode] = [self]
+        while let node = stack.popLast() {
+            if node.id == targetId { return node }
+            stack.append(contentsOf: node.children)
         }
         return nil
     }
@@ -154,10 +156,21 @@ class OutlineNode: Identifiable {
             isDone: isDone,
             isExpanded: isExpanded
         )
-        copy.children = children.map { child in
-            let childCopy = child.snapshot()
-            childCopy.parent = copy
-            return childCopy
+        var stack: [(source: OutlineNode, target: OutlineNode)] = [(self, copy)]
+        while let pair = stack.popLast() {
+            pair.target.children = pair.source.children.map { child in
+                let childCopy = OutlineNode(
+                    id: child.id,
+                    text: child.text,
+                    formatting: child.formatting,
+                    note: child.note,
+                    isDone: child.isDone,
+                    isExpanded: child.isExpanded
+                )
+                childCopy.parent = pair.target
+                stack.append((child, childCopy))
+                return childCopy
+            }
         }
         return copy
     }
@@ -172,10 +185,21 @@ class OutlineNode: Identifiable {
             isDone: isDone,
             isExpanded: isExpanded
         )
-        copy.children = children.map { child in
-            let childCopy = child.deepCopy()
-            childCopy.parent = copy
-            return childCopy
+        var stack: [(source: OutlineNode, target: OutlineNode)] = [(self, copy)]
+        while let pair = stack.popLast() {
+            pair.target.children = pair.source.children.map { child in
+                let childCopy = OutlineNode(
+                    id: UUID(),
+                    text: child.text,
+                    formatting: child.formatting,
+                    note: child.note,
+                    isDone: child.isDone,
+                    isExpanded: child.isExpanded
+                )
+                childCopy.parent = pair.target
+                stack.append((child, childCopy))
+                return childCopy
+            }
         }
         return copy
     }

@@ -80,10 +80,13 @@ struct ContentView: View {
                 }
                 .scrollEdgeEffectHidden(true, for: .top)
                 .onChange(of: store.pendingFocusId) { _, newId in
-                    if let id = newId {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
+                    guard let id = newId else { return }
+                    guard store.shouldScrollToPendingFocus else { return }
+                    DispatchQueue.main.async {
+                        guard store.root.find(id: id) != nil,
+                              store.shouldScrollToPendingFocus else { return }
+                        store.shouldScrollToPendingFocus = false
+                        proxy.scrollTo(id)
                     }
                 }
             }
@@ -432,4 +435,3 @@ final class WindowConfigurationNSView: NSView {
         WindowTabCoordinator.configure(window)
     }
 }
-
