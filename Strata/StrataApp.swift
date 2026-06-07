@@ -130,6 +130,9 @@ enum SessionState {
         let displayName: String
     }
 
+    /// Cached OpenWindowAction so we can open windows even when no window is focused.
+    static var cachedOpenWindow: OpenWindowAction?
+
     private final class WindowStoreRef {
         weak var window: NSWindow?
         weak var store: OutlineStore?
@@ -280,6 +283,7 @@ struct DocumentWindowView: View {
             .focusedSceneValue(\.activeStore, store)
             .focusedSceneValue(\.openWindowAction, openWindow)
             .onAppear {
+                SessionState.cachedOpenWindow = openWindow
                 // If a StrataDocument was queued for this window, adopt its store.
                 if let pendingDoc = StrataDocumentController.dequeuePendingDocument() {
                     adoptDocument(pendingDoc)
@@ -560,6 +564,11 @@ struct StrataApp: App {
             // MARK: File — Open / Recent
 
             CommandGroup(replacing: .newItem) {
+                Button("New") {
+                    openNewWindow()
+                }
+                .keyboardShortcut("n")
+
                 Button("New Tab") {
                     openUntitledTab()
                 }
@@ -802,6 +811,18 @@ struct StrataApp: App {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openWorkflowyImportURLAsTab(url)
+    }
+
+    private func openNewWindow() {
+        let doc = StrataDocument()
+        NSDocumentController.shared.addDocument(doc)
+        StrataDocumentController.enqueuePendingDocument(doc)
+        // Use the focused openWindow if available, fall back to the cached one
+        if let openWindow = openWindowAction {
+            openWindow(id: "main")
+        } else if let cached = SessionState.cachedOpenWindow {
+            cached(id: "main")
+        }
     }
 
     private func openUntitledTab() {
