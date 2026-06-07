@@ -1017,6 +1017,9 @@ class OutlineStore {
     }
 
     var noteToggleFallbackNodeId: UUID? {
+        if let editingNodeId {
+            return editingNodeId
+        }
         if let pendingFocusId {
             return pendingFocusId
         }

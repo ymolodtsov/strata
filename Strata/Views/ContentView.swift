@@ -69,27 +69,8 @@ struct ContentView: View {
                 .padding(.bottom, 2)
             }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        FlatOutline(store: store)
-                    }
-                    .padding(.top, store.zoomPath.isEmpty ? 16 : 8)
-                    .padding(.bottom, 60)
-                    .padding(.horizontal, 28)
-                }
-                .scrollEdgeEffectHidden(true, for: .top)
-                .onChange(of: store.pendingFocusId) { _, newId in
-                    guard let id = newId else { return }
-                    guard store.shouldScrollToPendingFocus else { return }
-                    DispatchQueue.main.async {
-                        guard store.root.find(id: id) != nil,
-                              store.shouldScrollToPendingFocus else { return }
-                        store.shouldScrollToPendingFocus = false
-                        proxy.scrollTo(id)
-                    }
-                }
-            }
+            AppKitOutlineSurface(store: store)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.top, 8)
 
             if store.hasSelection {
@@ -152,7 +133,7 @@ struct ContentView: View {
             }
             // Cmd+Shift+Enter — Toggle note on focused node
             if event.keyCode == 36 && flags == [.command, .shift] {
-                if let focusedId = StrataTextField.currentEditingField?.nodeId ?? store.noteToggleFallbackNodeId {
+                if let focusedId = StrataTextField.currentEditingField?.nodeId ?? store.editingNodeId ?? store.noteToggleFallbackNodeId {
                     store.toggleNote(nodeId: focusedId)
                 }
                 return nil

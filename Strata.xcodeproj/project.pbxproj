@@ -20,6 +20,7 @@
 		A10011 /* Strata-Welcome.opml in Resources */ = {isa = PBXBuildFile; fileRef = B10013; };
 		A10012 /* StrataDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10014; };
 		A10013 /* StrataDocumentController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10015; };
+		A10014 /* AppKitOutlineSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10016; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 		B10013 /* Strata-Welcome.opml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = "Strata-Welcome.opml"; sourceTree = "<group>"; };
 		B10014 /* StrataDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrataDocument.swift; sourceTree = "<group>"; };
 		B10015 /* StrataDocumentController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrataDocumentController.swift; sourceTree = "<group>"; };
+		B10016 /* AppKitOutlineSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppKitOutlineSurface.swift; sourceTree = "<group>"; };
 		B10020 /* Strata.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Strata.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -87,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				B10005 /* OutlineTextField.swift */,
+				B10016 /* AppKitOutlineSurface.swift */,
 				B10006 /* NodeRowView.swift */,
 				B10007 /* ContentView.swift */,
 				B10008 /* BreadcrumbView.swift */,
@@ -195,6 +198,7 @@
 				A10006 /* NodeRowView.swift in Sources */,
 				A10007 /* ContentView.swift in Sources */,
 				A10008 /* BreadcrumbView.swift in Sources */,
+				A10014 /* AppKitOutlineSurface.swift in Sources */,
 			A10010 /* ExportService.swift in Sources */,
 			A10012 /* StrataDocument.swift in Sources */,
 			A10013 /* StrataDocumentController.swift in Sources */,

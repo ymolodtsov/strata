@@ -1,4 +1,43 @@
+import AppKit
 import SwiftUI
+
+enum AppWindowBootstrap {
+    private static var controllers: [NSWindowController] = []
+
+    static func openWindow() {
+        DispatchQueue.main.async {
+            let controller = makeWindowController()
+            controllers.append(controller)
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            pruneClosedControllers()
+        }
+    }
+
+    static func openWindowIfNeeded() {
+        DispatchQueue.main.async {
+            guard NSApp.windows.contains(where: { $0.isVisible }) == false else { return }
+            openWindow()
+        }
+    }
+
+    private static func makeWindowController() -> NSWindowController {
+        let content = DocumentWindowView()
+        let hostingController = NSHostingController(rootView: content)
+        let window = NSWindow(contentViewController: hostingController)
+        window.setContentSize(NSSize(width: 720, height: 640))
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.title = "Strata"
+        window.isReleasedWhenClosed = false
+        window.center()
+        return NSWindowController(window: window)
+    }
+
+    private static func pruneClosedControllers() {
+        controllers = controllers.filter { $0.window?.isVisible == true }
+    }
+}
 
 // MARK: - Session State (persists open document tabs across launches)
 
@@ -591,15 +630,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTerminating = false
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        // Window creation is explicit: AppWindowBootstrap opens the first
+        // DocumentWindowView, which then consumes queued file/session state.
         false
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag, let cached = SessionState.cachedOpenWindow {
+        if !flag {
             let doc = StrataDocument()
             NSDocumentController.shared.addDocument(doc)
             StrataDocumentController.enqueuePendingDocument(doc)
-            cached(id: "main")
+            if let cached = SessionState.cachedOpenWindow {
+                cached(id: "main")
+            } else {
+                AppWindowBootstrap.openWindow()
+            }
         }
         return true
     }
@@ -627,6 +672,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 WindowTabCoordinator.configureVisibleWindows()
             }
         }
+
+        AppWindowBootstrap.openWindowIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -644,10 +691,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         SessionState.queueOpenURLs(urls)
+        AppWindowBootstrap.openWindowIfNeeded()
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         SessionState.queueOpenURLs([URL(fileURLWithPath: filename)])
+        AppWindowBootstrap.openWindowIfNeeded()
         return true
     }
 
@@ -682,9 +731,7 @@ struct StrataApp: App {
                 Button("Undo") {
                     // Route to field editor's undo when editing text,
                     // otherwise use the store's snapshot undo for structural changes
-                    if let window = NSApp.keyWindow,
-                       let textView = window.firstResponder as? NSTextView,
-                       textView.isFieldEditor {
+                    if let textView = activeFieldEditor() {
                         if activeStore?.shouldRouteStructuralUndoToStore == true {
                             activeStore?.undo()
                             return
@@ -697,9 +744,7 @@ struct StrataApp: App {
                 .keyboardShortcut("z", modifiers: .command)
 
                 Button("Redo") {
-                    if let window = NSApp.keyWindow,
-                       let textView = window.firstResponder as? NSTextView,
-                       textView.isFieldEditor {
+                    if let textView = activeFieldEditor() {
                         if activeStore?.shouldRouteStructuralRedoToStore == true {
                             activeStore?.redo()
                             return
@@ -863,29 +908,49 @@ struct StrataApp: App {
 
             CommandMenu("Format") {
                 Button("Bold") {
-                    StrataTextField.currentEditingField?.wrapBold()
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.wrapBold()
+                    } else {
+                        StrataTextField.currentEditingField?.wrapBold()
+                    }
                 }
                 .keyboardShortcut("b", modifiers: .command)
 
                 Button("Italic") {
-                    StrataTextField.currentEditingField?.wrapItalic()
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.wrapItalic()
+                    } else {
+                        StrataTextField.currentEditingField?.wrapItalic()
+                    }
                 }
                 .keyboardShortcut("i", modifiers: .command)
 
                 Button("Underline") {
-                    StrataTextField.currentEditingField?.wrapUnderline()
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.wrapUnderline()
+                    } else {
+                        StrataTextField.currentEditingField?.wrapUnderline()
+                    }
                 }
                 .keyboardShortcut("u", modifiers: .command)
 
                 Button("Highlight") {
-                    StrataTextField.currentEditingField?.wrapHighlight()
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.wrapHighlight()
+                    } else {
+                        StrataTextField.currentEditingField?.wrapHighlight()
+                    }
                 }
                 .keyboardShortcut("l", modifiers: .command)
 
                 Divider()
 
                 Button("Link...") {
-                    StrataTextField.currentEditingField?.editLink()
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.editLink()
+                    } else {
+                        StrataTextField.currentEditingField?.editLink()
+                    }
                 }
                 .keyboardShortcut("k", modifiers: .command)
             }
@@ -930,7 +995,9 @@ struct StrataApp: App {
 
             CommandMenu("Outline") {
                 Button("Move Node Up") {
-                    if let field = StrataTextField.currentEditingField {
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.moveCurrentNodeUp()
+                    } else if let field = StrataTextField.currentEditingField {
                         if field.onCmdShiftUp?() == true {
                             field.markStructuralEditForUndo()
                         }
@@ -941,7 +1008,9 @@ struct StrataApp: App {
                 .keyboardShortcut(.upArrow, modifiers: .command)
 
                 Button("Move Node Down") {
-                    if let field = StrataTextField.currentEditingField {
+                    if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+                        editor.moveCurrentNodeDown()
+                    } else if let field = StrataTextField.currentEditingField {
                         if field.onCmdShiftDown?() == true {
                             field.markStructuralEditForUndo()
                         }
@@ -1066,8 +1135,10 @@ struct StrataApp: App {
 
     private func activeFieldEditor() -> NSTextView? {
         guard let window = NSApp.keyWindow,
-              let textView = window.firstResponder as? NSTextView,
-              textView.isFieldEditor else { return nil }
+              let textView = window.firstResponder as? NSTextView else { return nil }
+        guard textView.isFieldEditor
+                || textView is AppKitOutlineEditorTextView
+                || textView is AppKitOutlineNoteTextView else { return nil }
         return textView
     }
 
@@ -1097,7 +1168,17 @@ struct StrataApp: App {
     private func performPaste() {
         if let textView = activeFieldEditor() {
             let pasteboard = NSPasteboard.general
-            if pasteboard.data(forType: OutlineStore.nodePasteboardType) != nil {
+            if let editor = textView as? AppKitOutlineEditorTextView {
+                if editor.pasteOutlineNodesFromPasteboard() {
+                    return
+                } else if let text = pasteboard.string(forType: .string) {
+                    textView.insertText(text, replacementRange: textView.selectedRange)
+                }
+            } else if textView is AppKitOutlineNoteTextView {
+                if let text = pasteboard.string(forType: .string) {
+                    textView.insertText(text, replacementRange: textView.selectedRange)
+                }
+            } else if pasteboard.data(forType: OutlineStore.nodePasteboardType) != nil {
                 if StrataTextField.currentEditingField?.onPasteNodes?() == true {
                     StrataTextField.currentEditingField?.markStructuralEditForUndo()
                 }
@@ -1116,15 +1197,25 @@ struct StrataApp: App {
     }
 
     private func insertCurrentDate() {
-        guard let field = StrataTextField.currentEditingField else { return }
-        field.insertDateString(StrataTextField.localizedCurrentDateString())
+        let dateString = StrataTextField.localizedCurrentDateString()
+        if let editor = activeFieldEditor() as? AppKitOutlineEditorTextView {
+            editor.insertDateString(dateString)
+        } else if let textView = activeFieldEditor() as? AppKitOutlineNoteTextView {
+            textView.insertText(dateString, replacementRange: textView.selectedRange)
+        } else {
+            StrataTextField.currentEditingField?.insertDateString(dateString)
+        }
     }
 
     private func performSelectAll() {
         if let textView = activeFieldEditor() {
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             if textView.selectedRange == fullRange {
-                StrataTextField.currentEditingField?.onSelectAllNodes?()
+                if let editor = textView as? AppKitOutlineEditorTextView {
+                    editor.selectAllVisibleNodes()
+                } else {
+                    StrataTextField.currentEditingField?.onSelectAllNodes?()
+                }
             } else {
                 textView.selectAll(nil)
             }
