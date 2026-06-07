@@ -5,21 +5,53 @@ enum AppWindowBootstrap {
     private static var controllers: [NSWindowController] = []
 
     static func openWindow() {
-        DispatchQueue.main.async {
-            let controller = makeWindowController()
-            controllers.append(controller)
-            controller.showWindow(nil)
-            controller.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            pruneClosedControllers()
+        if Thread.isMainThread {
+            openWindowOnMain()
+        } else {
+            DispatchQueue.main.async {
+                openWindowOnMain()
+            }
         }
     }
 
     static func openWindowIfNeeded() {
-        DispatchQueue.main.async {
-            guard NSApp.windows.contains(where: { $0.isVisible }) == false else { return }
-            openWindow()
+        if Thread.isMainThread {
+            guard shouldOpenBootstrapWindow else { return }
+            openWindowOnMain()
+        } else {
+            DispatchQueue.main.async {
+                guard shouldOpenBootstrapWindow else { return }
+                openWindowOnMain()
+            }
         }
+    }
+
+    static func closeUntitledBootstrapWindows() {
+        DispatchQueue.main.async {
+            controllers = controllers.filter { controller in
+                guard let window = controller.window else { return false }
+                if window.isVisible && window.title.hasPrefix("Untitled") {
+                    window.close()
+                    return false
+                }
+                return window.isVisible
+            }
+        }
+    }
+
+    private static var shouldOpenBootstrapWindow: Bool {
+        NSApp.windows.contains(where: { $0.isVisible }) == false
+            && NSDocumentController.shared.documents.isEmpty
+            && StrataDocumentController.pendingDocuments.isEmpty
+    }
+
+    private static func openWindowOnMain() {
+        let controller = makeWindowController()
+        controllers.append(controller)
+        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        pruneClosedControllers()
     }
 
     private static func makeWindowController() -> NSWindowController {
@@ -191,6 +223,16 @@ enum SessionState {
 
     private static var windowStores: [ObjectIdentifier: WindowStoreRef] = [:]
 
+    private final class StoreRef {
+        weak var store: OutlineStore?
+
+        init(store: OutlineStore) {
+            self.store = store
+        }
+    }
+
+    private static var liveStores: [ObjectIdentifier: StoreRef] = [:]
+
     /// Items waiting to be loaded by newly created windows during restoration.
     struct PendingRestoreItem {
         let url: URL
@@ -208,7 +250,9 @@ enum SessionState {
     static func queueOpenURLs(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         pendingOpenURLs.append(contentsOf: urls)
-        NotificationCenter.default.post(name: openURLsNotification, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: openURLsNotification, object: nil)
+        }
     }
 
     static func consumePendingOpenURLs() -> [URL] {
@@ -219,7 +263,13 @@ enum SessionState {
 
     static func associate(store: OutlineStore, with window: NSWindow) {
         cleanupWindowStores()
+        register(store: store)
         windowStores[ObjectIdentifier(window)] = WindowStoreRef(window: window, store: store)
+    }
+
+    static func register(store: OutlineStore) {
+        cleanupLiveStores()
+        liveStores[ObjectIdentifier(store)] = StoreRef(store: store)
     }
 
     static func store(for window: NSWindow?) -> OutlineStore? {
@@ -235,6 +285,25 @@ enum SessionState {
         store(for: NSApp.keyWindow) ??
         store(for: NSApp.mainWindow) ??
         NSApp.windows.lazy.compactMap { windowStores[ObjectIdentifier($0)]?.store }.first
+    }
+
+    static func closeEmptyUntitledWindows() {
+        cleanupWindowStores()
+        for (_, ref) in windowStores {
+            guard let window = ref.window,
+                  window.isVisible,
+                  let store = ref.store,
+                  store.document?.fileURL == nil,
+                  isEmptyUntitled(store) else { continue }
+            window.close()
+        }
+    }
+
+    private static func isEmptyUntitled(_ store: OutlineStore) -> Bool {
+        store.root.children.count == 1
+            && store.root.children[0].text.isEmpty
+            && store.root.children[0].note.isEmpty
+            && store.root.children[0].children.isEmpty
     }
 
     /// Collect file paths from all living OutlineStore instances and save to UserDefaults.
@@ -299,6 +368,50 @@ enum SessionState {
             }
         }
 
+        if windowGroups.isEmpty && NSApp.windows.contains(where: { $0.isVisible }) {
+            var group: [[String: String]] = []
+            var fallbackStores: [OutlineStore] = []
+            var seenStoreIds = Set<ObjectIdentifier>()
+
+            for doc in NSDocumentController.shared.documents.compactMap({ $0 as? StrataDocument }) {
+                if seenStoreIds.insert(ObjectIdentifier(doc.store)).inserted {
+                    fallbackStores.append(doc.store)
+                }
+            }
+            cleanupLiveStores()
+            for (_, ref) in liveStores {
+                if let store = ref.store,
+                   seenStoreIds.insert(ObjectIdentifier(store)).inserted {
+                    fallbackStores.append(store)
+                }
+            }
+
+            for store in fallbackStores {
+                if let url = store.document?.fileURL {
+                    let path = url.path
+                    group.append(["path": path, "isDraft": "false"])
+                    if seenPaths.insert(path).inserted {
+                        flatSavedPaths.append(path)
+                    }
+                } else if store.root.children.count > 1 ||
+                            (store.root.children.count == 1 && !store.root.children[0].text.isEmpty) {
+                    let draftId = UUID().uuidString
+                    let draftURL = draftsDirectory.appendingPathComponent("\(draftId).opml")
+                    let data = OPMLService.serialize(root: store.root)
+                    do {
+                        try data.write(to: draftURL, options: .atomic)
+                        savedDraftPaths.append(draftURL.path)
+                        group.append(["draft": draftId, "isDraft": "true"])
+                    } catch {
+                        // Draft save failed -- skip this entry
+                    }
+                }
+            }
+            if !group.isEmpty {
+                windowGroups.append(group)
+            }
+        }
+
         // Save backward-compatible flat list (saved files only)
         UserDefaults.standard.set(flatSavedPaths, forKey: key)
         // Save draft paths for cleanup
@@ -310,6 +423,7 @@ enum SessionState {
         } else {
             UserDefaults.standard.removeObject(forKey: windowGroupsKey)
         }
+        UserDefaults.standard.synchronize()
     }
 
     /// Load saved session state including window groups and drafts.
@@ -400,6 +514,12 @@ enum SessionState {
         }
     }
 
+    private static func cleanupLiveStores() {
+        liveStores = liveStores.filter { _, ref in
+            ref.store != nil
+        }
+    }
+
     static func forget(window: NSWindow) {
         windowStores.removeValue(forKey: ObjectIdentifier(window))
     }
@@ -449,6 +569,9 @@ struct DocumentWindowView: View {
                 SessionState.cachedOpenWindow = openWindow
                 // If a StrataDocument was queued for this window, adopt its store.
                 if let pendingDoc = StrataDocumentController.dequeuePendingDocument() {
+                    if Self.isFirstWindow {
+                        Self.isFirstWindow = false
+                    }
                     adoptDocument(pendingDoc)
                 } else if Self.isFirstWindow {
                     Self.isFirstWindow = false
@@ -483,6 +606,7 @@ struct DocumentWindowView: View {
                     // Untitled new tab — wrap in a StrataDocument
                     wrapStoreInDocument()
                 }
+                SessionState.register(store: store)
             }
             .onReceive(NotificationCenter.default.publisher(for: SessionState.openURLsNotification)) { _ in
                 openQueuedURLs()
@@ -673,12 +797,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        AppWindowBootstrap.openWindowIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            AppWindowBootstrap.openWindowIfNeeded()
+        }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Save while document windows are still visible. Waiting for
+        // applicationWillTerminate can be too late after AppKit starts teardown.
+        SessionState.saveOpenDocuments()
+        return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
-        SessionState.saveOpenDocuments()
     }
 
     func application(_ application: NSApplication, shouldSaveSecureApplicationState coder: NSCoder) -> Bool {
@@ -1270,6 +1402,7 @@ struct StrataApp: App {
         } else {
             // Fallback for menu/native recent paths where SwiftUI focused values are unavailable.
             SessionState.queueOpenURLs([fileURL])
+            AppWindowBootstrap.openWindowIfNeeded()
         }
     }
 
@@ -1288,7 +1421,8 @@ struct StrataApp: App {
             SessionState.pendingWorkflowyImportURLs.append(fileURL)
             openWindow(id: "main")
         } else {
-            NSSound.beep()
+            SessionState.pendingWorkflowyImportURLs.append(fileURL)
+            AppWindowBootstrap.openWindowIfNeeded()
         }
     }
 

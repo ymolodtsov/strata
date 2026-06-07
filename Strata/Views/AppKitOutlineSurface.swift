@@ -1000,7 +1000,7 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
             return
         }
         if let noteFrame = row.noteFrame {
-            textView.frame = noteFrame.insetBy(dx: 0, dy: -1)
+            textView.frame = noteFrame
             textView.isHidden = false
         } else {
             textView.isHidden = true
@@ -1008,7 +1008,7 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
     }
 
     private func editorFrame(for row: AppKitOutlineRow) -> CGRect {
-        row.textFrame.insetBy(dx: 0, dy: -1)
+        row.textFrame
     }
 
     private func drawRow(_ row: AppKitOutlineRow, store: OutlineStore) {

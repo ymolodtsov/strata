@@ -369,6 +369,7 @@ struct WindowConfigurator: NSViewRepresentable {
         }
         let wc = StrataWindowController(window: window)
         doc.addWindowController(wc)
+        doc.markWindowBridgeInstalled()
         window.title = doc.displayName
     }
 

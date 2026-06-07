@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 class StrataDocument: NSDocument {
 
     let store: OutlineStore
+    private var isCreatingWindowBridge = false
 
     override init() {
         self.store = OutlineStore()
@@ -27,6 +28,19 @@ class StrataDocument: NSDocument {
     override var undoManager: UndoManager? {
         get { nil }
         set {}
+    }
+
+    override func makeWindowControllers() {
+        guard windowControllers.isEmpty, !isCreatingWindowBridge else { return }
+        isCreatingWindowBridge = true
+        AppWindowBootstrap.closeUntitledBootstrapWindows()
+        SessionState.closeEmptyUntitledWindows()
+        StrataDocumentController.enqueuePendingDocument(self)
+        AppWindowBootstrap.openWindow()
+    }
+
+    func markWindowBridgeInstalled() {
+        isCreatingWindowBridge = false
     }
 
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
