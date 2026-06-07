@@ -298,6 +298,9 @@ private struct AppKitOutlineMetrics {
     static let textGap: CGFloat = 5
     static let rowVerticalPadding: CGFloat = 2
     static let rowControlHeight: CGFloat = 26
+    static let controlTopOffset: CGFloat = -2
+    static let textTopOffset: CGFloat = 1
+    static let checkboxDiameter: CGFloat = 15
     static let topPaddingExpanded: CGFloat = 16
     static let topPaddingZoomed: CGFloat = 8
     static let bottomPadding: CGFloat = 60
@@ -751,11 +754,12 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
 
             let rowFrame = CGRect(x: 0, y: y, width: width, height: rowHeight)
             let controlY = y + AppKitOutlineMetrics.rowVerticalPadding
+            let visualControlY = controlY + AppKitOutlineMetrics.controlTopOffset
             let depthX = AppKitOutlineMetrics.horizontalPadding + CGFloat(item.depth) * AppKitOutlineMetrics.indentWidth
-            let checkboxFrame = CGRect(x: depthX, y: controlY, width: AppKitOutlineMetrics.checkboxWidth, height: AppKitOutlineMetrics.rowControlHeight)
-            let chevronFrame = CGRect(x: checkboxFrame.maxX, y: controlY, width: AppKitOutlineMetrics.chevronWidth, height: AppKitOutlineMetrics.rowControlHeight)
-            let bulletFrame = CGRect(x: chevronFrame.maxX, y: controlY, width: AppKitOutlineMetrics.bulletWidth, height: AppKitOutlineMetrics.rowControlHeight)
-            let textFrame = CGRect(x: textX, y: controlY, width: textWidth, height: textHeight)
+            let checkboxFrame = CGRect(x: depthX, y: visualControlY, width: AppKitOutlineMetrics.checkboxWidth, height: AppKitOutlineMetrics.rowControlHeight)
+            let chevronFrame = CGRect(x: checkboxFrame.maxX, y: visualControlY, width: AppKitOutlineMetrics.chevronWidth, height: AppKitOutlineMetrics.rowControlHeight)
+            let bulletFrame = CGRect(x: chevronFrame.maxX, y: visualControlY, width: AppKitOutlineMetrics.bulletWidth, height: AppKitOutlineMetrics.rowControlHeight)
+            let textFrame = CGRect(x: textX, y: controlY + AppKitOutlineMetrics.textTopOffset, width: textWidth, height: textHeight)
             let noteFrame: CGRect? = noteHeight > 0
                 ? CGRect(x: textX, y: textFrame.maxY + AppKitOutlineMetrics.noteSpacing, width: textWidth, height: noteHeight)
                 : nil
@@ -1055,7 +1059,13 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
 
     private func drawCheckbox(for row: AppKitOutlineRow, store: OutlineStore) {
         guard row.node.isDone || store.hoveredRowId == row.node.id else { return }
-        let rect = row.checkboxFrame.insetBy(dx: 3.5, dy: 5.5)
+        let diameter = AppKitOutlineMetrics.checkboxDiameter
+        let rect = CGRect(
+            x: row.checkboxFrame.midX - diameter / 2,
+            y: row.checkboxFrame.midY - diameter / 2,
+            width: diameter,
+            height: diameter
+        )
         let path = NSBezierPath(ovalIn: rect)
         path.lineWidth = 1.4
 
