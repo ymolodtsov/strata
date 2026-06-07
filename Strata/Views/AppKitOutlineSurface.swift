@@ -1194,6 +1194,9 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
     }
 
     private func characterIndex(at point: CGPoint, in row: AppKitOutlineRow) -> Int {
+        let textLength = (row.node.text as NSString).length
+        guard textLength > 0 else { return 0 }
+
         let attributed = displayAttributedString(for: row.node, store: store)
         let storage = NSTextStorage(attributedString: attributed)
         let layoutManager = NSLayoutManager()
@@ -1203,12 +1206,24 @@ final class AppKitOutlineDocumentView: NSView, NSTextViewDelegate {
         storage.addLayoutManager(layoutManager)
         layoutManager.ensureLayout(for: textContainer)
         let local = CGPoint(x: max(0, point.x - row.textFrame.minX), y: max(0, point.y - row.textFrame.minY))
+
+        if layoutManager.numberOfGlyphs > 0 {
+            let glyphIndex = layoutManager.glyphIndex(for: local, in: textContainer)
+            var lineGlyphRange = NSRange(location: 0, length: 0)
+            let usedRect = layoutManager.lineFragmentUsedRect(forGlyphAt: glyphIndex, effectiveRange: &lineGlyphRange)
+            if local.x >= usedRect.maxX {
+                let lineCharacterRange = layoutManager.characterRange(forGlyphRange: lineGlyphRange, actualGlyphRange: nil)
+                return min(NSMaxRange(lineCharacterRange), textLength)
+            }
+        }
+
+        var fraction: CGFloat = 0
         let index = layoutManager.characterIndex(
             for: local,
             in: textContainer,
-            fractionOfDistanceBetweenInsertionPoints: nil
+            fractionOfDistanceBetweenInsertionPoints: &fraction
         )
-        return min(index, (row.node.text as NSString).length)
+        return min(index + (fraction > 0.5 ? 1 : 0), textLength)
     }
 
     private static func extractFormatting(from storage: NSTextStorage?) -> [TextFormattingSpan] {
