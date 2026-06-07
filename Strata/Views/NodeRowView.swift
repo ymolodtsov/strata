@@ -41,9 +41,9 @@ struct NodeRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            // Indentation with hierarchy lines
+            // Indentation with hierarchy guide lines
             if depth > 0 {
-                Spacer()
+                HierarchyIndentGuide(depth: depth)
                     .frame(width: CGFloat(depth) * OutlineLayoutMetrics.indentWidth)
             }
 
@@ -469,6 +469,28 @@ struct FlatOutline: View {
                         NoteEditorView(node: item.node, depth: item.depth, store: store)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Draws vertical guide lines at each indent level. Rendered per-row so no
+/// cross-row preference communication is needed — adjacent rows at the same
+/// depth draw at the same X position, producing a continuous vertical line.
+private struct HierarchyIndentGuide: View {
+    let depth: Int
+
+    var body: some View {
+        Canvas { context, size in
+            for level in 0..<depth {
+                let x = CGFloat(level) * OutlineLayoutMetrics.indentWidth
+                    + OutlineLayoutMetrics.checkboxWidth
+                    + OutlineLayoutMetrics.chevronWidth
+                    + (OutlineLayoutMetrics.bulletWidth / 2)
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(.primary.opacity(0.08)), lineWidth: 1)
             }
         }
     }

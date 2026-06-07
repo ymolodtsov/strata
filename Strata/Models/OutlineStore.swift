@@ -1,6 +1,27 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import os.log
+
+private let strataLogger = Logger(subsystem: "family.ma.strata", category: "perf")
+private let strataLogFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Strata/perf.log")
+
+func strataLog(_ message: String) {
+    strataLogger.info("\(message, privacy: .public)")
+    let line = "\(Date()): \(message)\n"
+    if let data = line.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: strataLogFile.path) {
+            if let handle = try? FileHandle(forWritingTo: strataLogFile) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            }
+        } else {
+            try? FileManager.default.createDirectory(at: strataLogFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: strataLogFile)
+        }
+    }
+}
 
 @Observable
 class OutlineStore {
@@ -814,7 +835,9 @@ class OutlineStore {
 
     @discardableResult
     func pasteNodes(after nodeId: UUID, selectInserted: Bool = false) -> Bool {
+        let t0 = CFAbsoluteTimeGetCurrent()
         if pasteOutlineNodes(after: nodeId, selectInserted: selectInserted) {
+            strataLog(String(format: "[Strata Paste] outlineNodes path took %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
             return true
         }
 
@@ -824,15 +847,24 @@ class OutlineStore {
               let refParent = refNode.parent,
               let refIndex = refParent.indexOfChild(nodeId) else { return false }
 
+        let t1 = CFAbsoluteTimeGetCurrent()
         let topLevel = nodesFromPlainText(pasteText)
         guard !topLevel.isEmpty else { return false }
+        strataLog(String(format: "[Strata Paste] plainText parse: %.1fms (%d nodes)", (CFAbsoluteTimeGetCurrent() - t1) * 1000, topLevel.count))
 
+        let t2 = CFAbsoluteTimeGetCurrent()
         saveUndoState()
+        strataLog(String(format: "[Strata Paste] saveUndoState: %.1fms", (CFAbsoluteTimeGetCurrent() - t2) * 1000))
+
+        let t3 = CFAbsoluteTimeGetCurrent()
         let insertedIds = insertNodes(topLevel, into: refParent, at: refIndex + 1)
         if selectInserted {
             selectNodes(insertedIds)
         }
+        strataLog(String(format: "[Strata Paste] insertNodes: %.1fms", (CFAbsoluteTimeGetCurrent() - t3) * 1000))
+
         scheduleSave()
+        strataLog(String(format: "[Strata Paste] total: %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
         return true
     }
 
@@ -844,15 +876,24 @@ class OutlineStore {
               let data = NSPasteboard.general.data(forType: Self.nodePasteboardType),
               let payload = try? JSONDecoder().decode(ClipboardPayload.self, from: data) else { return false }
 
+        let t0 = CFAbsoluteTimeGetCurrent()
         let topLevel = payload.nodes.map { $0.makeOutlineNode() }
         guard !topLevel.isEmpty else { return false }
+        strataLog(String(format: "[Strata Paste] JSON decode+build: %.1fms (%d nodes)", (CFAbsoluteTimeGetCurrent() - t0) * 1000, topLevel.count))
 
+        let t1 = CFAbsoluteTimeGetCurrent()
         saveUndoState()
+        strataLog(String(format: "[Strata Paste] saveUndoState: %.1fms", (CFAbsoluteTimeGetCurrent() - t1) * 1000))
+
+        let t2 = CFAbsoluteTimeGetCurrent()
         let insertedIds = insertNodes(topLevel, into: refParent, at: refIndex + 1)
         if selectInserted {
             selectNodes(insertedIds)
         }
+        strataLog(String(format: "[Strata Paste] insertNodes: %.1fms", (CFAbsoluteTimeGetCurrent() - t2) * 1000))
+
         scheduleSave()
+        strataLog(String(format: "[Strata Paste] total: %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000))
         return true
     }
 

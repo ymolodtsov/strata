@@ -155,7 +155,19 @@ struct OutlineTextField: NSViewRepresentable {
         }
     }
 
+    private static var applyStyleCount = 0
+    private static var applyStyleTimer: CFAbsoluteTime = 0
+
     private func applyStyle(_ tf: StrataTextField) {
+        if Self.applyStyleCount == 0 { Self.applyStyleTimer = CFAbsoluteTimeGetCurrent() }
+        Self.applyStyleCount += 1
+        DispatchQueue.main.async {
+            if Self.applyStyleCount > 0 {
+                strataLog(String(format: "[Strata Render] applyStyle called %d times in %.1fms", Self.applyStyleCount, (CFAbsoluteTimeGetCurrent() - Self.applyStyleTimer) * 1000))
+                Self.applyStyleCount = 0
+            }
+        }
+
         let font = Self.font
         let currentText = text
         let currentFormatting = formatting
