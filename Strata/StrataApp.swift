@@ -1224,14 +1224,12 @@ struct StrataApp: App {
         let doc = StrataDocument()
         NSDocumentController.shared.addDocument(doc)
         StrataDocumentController.enqueuePendingDocument(doc)
-        // Open as tab if a window exists, standalone window otherwise
-        if NSApp.keyWindow != nil || NSApp.windows.contains(where: { $0.isVisible }) {
-            WindowTabCoordinator.requestNextWindowAsTab()
-        }
         if let openWindow = openWindowAction {
             openWindow(id: "main")
         } else if let cached = SessionState.cachedOpenWindow {
             cached(id: "main")
+        } else {
+            AppWindowBootstrap.openWindow()
         }
     }
 
